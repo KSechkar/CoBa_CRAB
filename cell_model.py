@@ -92,7 +92,8 @@ class CellModelAuxiliary:
         # call initialisers
         module1_par, module1_init_conds, module1_genes, module1_miscs, module1_name2pos, module1_styles = module1_initialiser()
         module2_par, module2_init_conds, module2_genes, module2_miscs, module2_name2pos, module2_styles = module2_initialiser()
-        controller_par, controller_init_conds, controller_init_memory, controller_name2pos = controller_initialiser()
+        controller_par, controller_init_conds, controller_init_memory, \
+            controller_memos, controller_dynvars, controller_name2pos, controller_styles = controller_initialiser()
 
         # update parameter, initial condition
         cellmodel_par.update(module1_par)
@@ -108,7 +109,8 @@ class CellModelAuxiliary:
 
         # merge style dictionaries for the two modules
         modules_styles = module1_styles.copy()
-        modules_styles.update(module2_styles)
+        modules_styles['colours'].update(module2_styles['colours'])
+        modules_styles['dashes'].update(module2_styles['dashes'])
         
         # merge name-to-position dictionaries for the two modules: requires rearranging the variables
         # new order in x: module 1 mRNAs - module 2 mRNAs - module 1 proteins - module 2 proteins - module 1 misc - module 2 misc
@@ -148,6 +150,11 @@ class CellModelAuxiliary:
                 #  module 1 misc shifted by the number of module 1 mRNAs, proteins and miscs
                 else:
                     modules_name2pos[key] = module2_name2pos[key] + 2 * len(module1_genes) +len(module1_miscs)
+
+        # update controller name-to-position dictionary now that genetic modules have been added
+        for key in controller_name2pos.keys():
+            if(key in controller_name2pos):
+                controller_name2pos[key] = controller_name2pos[key] + 2 * len(module1_genes) + 2 * len(module2_genes) + len(module1_miscs) + len(module2_miscs)
 
         # merge gene and miscellaneous species lists
         synth_genes = module1_genes + module2_genes
@@ -194,10 +201,12 @@ class CellModelAuxiliary:
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
         return (cellmodel_ode,
                 module1_F_calc, module2_F_calc, controller_action, controller_update,
-                cellmodel_par, cellmodel_init_conds,
+                cellmodel_par, cellmodel_init_conds, controller_init_memory,
                 (synth_genes, module1_genes, module2_genes),
                 (synth_miscs, module1_miscs, module2_miscs),
-                modules_name2pos, modules_styles, controller_name2pos,
+                controller_memos, controller_dynvars,
+                modules_name2pos, modules_styles,
+                controller_name2pos, controller_styles,
                 module1_v_with_F_calc, module2_v_with_F_calc)
 
     # package synthetic gene parameters into jax arrays for calculating k values
@@ -297,7 +306,7 @@ class CellModelAuxiliary:
     # set default initial condition vector
     def x0_from_init_conds(self, init_conds,
                            par,
-                           synth_genes, synth_miscs,
+                           synth_genes, synth_miscs, controller_dynvars,
                            modules_name2pos, controller_name2pos):
         # NATIVE GENES
         x0 = [
@@ -328,9 +337,9 @@ class CellModelAuxiliary:
             x0[modules_name2pos[misc]]=init_conds[misc]
 
         # CONTROLLER
-        x0 += [0]*len(controller_name2pos)
-        for key in controller_name2pos.keys():
-            x0[controller_name2pos[key]] = init_conds[key]
+        x0 += [0]*len(controller_dynvars)
+        for dynvar in controller_dynvars:
+            x0[controller_name2pos[dynvar]] = init_conds[dynvar]
 
         return jnp.array(x0)
 
@@ -519,142 +528,260 @@ class CellModelAuxiliary:
 
         return mRNA_figure, protein_figure, tRNA_figure, h_figure
 
-    # # plot concentrations for the synthetic circuits
-    # def plot_circuit_concentrations(self, ts, xs,
-    #                                 par, synth_genes, synth_miscs, modules_name2pos,
-    #                                 # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-    #                                 circuit_styles,  # colours for the circuit plots
-    #                                 dimensions=(320, 180), tspan=None):
-    #     # if no circuitry at all, return no plots
-    #     if (len(synth_genes) + len(synth_miscs) == 0):
-    #         return None, None, None
-    # 
-    #     # set default time span if unspecified
-    #     if (tspan == None):
-    #         tspan = (ts[0], ts[-1])
-    # 
-    #     # Create a ColumnDataSource object for the plot
-    #     data_for_column = {'t': ts}  # initialise with time axis
-    #     # record synthetic mRNA and protein concentrations
-    #     for i in range(0, len(synth_genes)):
-    #         data_for_column['m_' + synth_genes[i]] = xs[:, 8 + i]
-    #         data_for_column['p_' + synth_genes[i]] = xs[:, 8 + len(synth_genes) + i]
-    #     # record miscellaneous species' concentrations
-    #     for i in range(0, len(synth_miscs)):
-    #         data_for_column[synth_miscs[i]] = xs[:, 8 + len(synth_genes) * 2 + i]
-    #     source = bkmodels.ColumnDataSource(data=data_for_column)
-    # 
-    #     # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
-    #     if (len(synth_genes) > 0):
-    #         # mRNAs
-    #         mRNA_figure = bkplot.figure(
-    #             frame_width=dimensions[0],
-    #             frame_height=dimensions[1],
-    #             x_axis_label="t, hours",
-    #             y_axis_label="mRNA conc., nM",
-    #             x_range=tspan,
-    #             title='mRNA concentrations',
-    #             tools="box_zoom,pan,hover,reset"
-    #         )
-    #         for gene in synth_genes:
-    #             mRNA_figure.line(x='t', y='m_' + gene, source=source, line_width=1.5,
-    #                              line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-    #                              legend_label='m_' + gene)
-    #         mRNA_figure.legend.label_text_font_size = "8pt"
-    #         mRNA_figure.legend.location = "top_right"
-    #         mRNA_figure.legend.click_policy = 'hide'
-    # 
-    #         # proteins
-    #         protein_figure = bkplot.figure(
-    #             frame_width=dimensions[0],
-    #             frame_height=dimensions[1],
-    #             x_axis_label="t, hours",
-    #             y_axis_label="Protein conc., nM",
-    #             x_range=tspan,
-    #             title='Protein concentrations',
-    #             tools="box_zoom,pan,hover,reset"
-    #         )
-    #         for gene in synth_genes:
-    #             protein_figure.line(x='t', y='p_' + gene, source=source, line_width=1.5,
-    #                                 line_color=circuit_styles['colours'][gene],
-    #                                 line_dash=circuit_styles['dashes'][gene],
-    #                                 legend_label='p_' + gene)
-    #         protein_figure.legend.label_text_font_size = "8pt"
-    #         protein_figure.legend.location = "top_right"
-    #         protein_figure.legend.click_policy = 'hide'
-    #     else:
-    #         mRNA_figure = None
-    #         protein_figure = None
-    # 
-    #     # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
-    #     if (len(synth_miscs) > 0):
-    #         misc_figure = bkplot.figure(
-    #             frame_width=dimensions[0],
-    #             frame_height=dimensions[1],
-    #             x_axis_label="t, hours",
-    #             y_axis_label="Conc., nM",
-    #             x_range=tspan,
-    #             title='Miscellaneous species concentrations',
-    #             tools="box_zoom,pan,hover,reset"
-    #         )
-    #         for misc in synth_miscs:
-    #             misc_figure.line(x='t', y=misc, source=source, line_width=1.5,
-    #                              line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
-    #                              legend_label=misc)
-    #         misc_figure.legend.label_text_font_size = "8pt"
-    #         misc_figure.legend.location = "top_right"
-    #         misc_figure.legend.click_policy = 'hide'
-    #     else:
-    #         misc_figure = None
-    # 
-    #     return mRNA_figure, protein_figure, misc_figure
-    # 
-    # # plot transcription regulation function values for the circuit's genes
-    # def plot_circuit_regulation(self, ts, xs,
-    #                             circuit_F_calc,
-    #                             # function calculating the transcription regulation functions for the circuit
-    #                             par, synth_genes, synth_miscs, modules_name2pos,
-    #                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-    #                             circuit_styles,  # colours for the circuit plots
-    #                             dimensions=(320, 180), tspan=None):
-    #     # if no circuitry, return no plots
-    #     if (len(synth_genes) == 0):
-    #         return None
-    # 
-    #     # set default time span if unspecified
-    #     if (tspan == None):
-    #         tspan = (ts[0], ts[-1])
-    # 
-    #     # find values of gene transcription regulation functions
-    #     Fs = np.zeros((len(ts), len(synth_genes)))  # initialise
-    #     for i in range(0, len(ts)):
-    #         Fs[i, :] = np.array(circuit_F_calc(ts[i], xs[i, :], par, modules_name2pos)[:])
-    # 
-    #     # Create ColumnDataSource object for the plot
-    #     data_for_column = {'t': ts}  # initialise with time axis
-    #     for i in range(0, len(synth_genes)):
-    #         data_for_column['F_' + str(synth_genes[i])] = Fs[:, i]
-    # 
-    #     # PLOT
-    #     F_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="Transc. reg. funcs. F",
-    #         x_range=tspan,
-    #         y_range=(0, 1.05),
-    #         title='Gene transcription regulation',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    #     for gene in synth_genes:
-    #         F_figure.line(x='t', y='F_' + gene, source=data_for_column, line_width=1.5,
-    #                       line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-    #                       legend_label='F_' + gene)
-    #     F_figure.legend.label_text_font_size = "8pt"
-    #     F_figure.legend.location = "top_right"
-    #     F_figure.legend.click_policy = 'hide'
-    # 
-    #     return F_figure
+    # plot concentrations for the synthetic circuits
+    def plot_circuit_concentrations(self, ts, xs,
+                                    par, synth_genes, synth_miscs, modules_name2pos,
+                                    # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
+                                    modules_styles,  # colours for the circuit plots
+                                    dimensions=(320, 180), tspan=None):
+        # if no circuitry at all, return no plots
+        if (len(synth_genes) + len(synth_miscs) == 0):
+            return None, None, None
+
+        # set default time span if unspecified
+        if (tspan == None):
+            tspan = (ts[0], ts[-1])
+
+        # Create a ColumnDataSource object for the plot
+        data_for_column = {'t': ts}  # initialise with time axis
+        # record synthetic mRNA and protein concentrations
+        for i in range(0, len(synth_genes)):
+            data_for_column['m_' + synth_genes[i]] = xs[:, 8 + i]
+            data_for_column['p_' + synth_genes[i]] = xs[:, 8 + len(synth_genes) + i]
+        # record miscellaneous species' concentrations
+        for i in range(0, len(synth_miscs)):
+            data_for_column[synth_miscs[i]] = xs[:, 8 + len(synth_genes) * 2 + i]
+        source = bkmodels.ColumnDataSource(data=data_for_column)
+
+        # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
+        if (len(synth_genes) > 0):
+            # mRNAs
+            mRNA_figure = bkplot.figure(
+                frame_width=dimensions[0],
+                frame_height=dimensions[1],
+                x_axis_label="t, hours",
+                y_axis_label="mRNA conc., nM",
+                x_range=tspan,
+                title='mRNA concentrations',
+                tools="box_zoom,pan,hover,reset"
+            )
+            for gene in synth_genes:
+                mRNA_figure.line(x='t', y='m_' + gene, source=source, line_width=1.5,
+                                 line_color=modules_styles['colours'][gene], line_dash=modules_styles['dashes'][gene],
+                                 legend_label='m_' + gene)
+            mRNA_figure.legend.label_text_font_size = "8pt"
+            mRNA_figure.legend.location = "top_right"
+            mRNA_figure.legend.click_policy = 'hide'
+
+            # proteins
+            protein_figure = bkplot.figure(
+                frame_width=dimensions[0],
+                frame_height=dimensions[1],
+                x_axis_label="t, hours",
+                y_axis_label="Protein conc., nM",
+                x_range=tspan,
+                title='Protein concentrations',
+                tools="box_zoom,pan,hover,reset"
+            )
+            for gene in synth_genes:
+                protein_figure.line(x='t', y='p_' + gene, source=source, line_width=1.5,
+                                    line_color=modules_styles['colours'][gene],
+                                    line_dash=modules_styles['dashes'][gene],
+                                    legend_label='p_' + gene)
+            protein_figure.legend.label_text_font_size = "8pt"
+            protein_figure.legend.location = "top_right"
+            protein_figure.legend.click_policy = 'hide'
+        else:
+            mRNA_figure = None
+            protein_figure = None
+
+        # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
+        if (len(synth_miscs) > 0):
+            misc_figure = bkplot.figure(
+                frame_width=dimensions[0],
+                frame_height=dimensions[1],
+                x_axis_label="t, hours",
+                y_axis_label="Conc., nM",
+                x_range=tspan,
+                title='Miscellaneous species concentrations',
+                tools="box_zoom,pan,hover,reset"
+            )
+            for misc in synth_miscs:
+                misc_figure.line(x='t', y=misc, source=source, line_width=1.5,
+                                 line_color=modules_styles['colours'][misc], line_dash=modules_styles['dashes'][misc],
+                                 legend_label=misc)
+            misc_figure.legend.label_text_font_size = "8pt"
+            misc_figure.legend.location = "top_right"
+            misc_figure.legend.click_policy = 'hide'
+        else:
+            misc_figure = None
+
+        return mRNA_figure, protein_figure, misc_figure
+
+    # plot transcription regulation function values for the circuit's genes
+    def plot_circuit_regulation(self, ts, xs, ctrl_memorecord, # time points and state vectors
+                                module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
+                                controller_action, # control action calculator
+                                par, # model parameters
+                                synth_genes_total_and_each,     # list of synthetic genes - total and for each module
+                                synth_miscs_total_and_each,     # list of synthetic miscellaneous species - total and for each module
+                                modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
+                                controller_name2pos, # dictionary mapping controller species to their positions in the state vector
+                                modules_styles,  # colours for the circuit plots
+                                dimensions=(320, 180), tspan=None):
+        # unpack synthetic gene and miscellaneous specie lists
+        synth_genes = synth_genes_total_and_each[0]
+        module1_genes = synth_genes_total_and_each[1]
+        module2_genes = synth_genes_total_and_each[2]
+        synth_miscs = synth_miscs_total_and_each[0]
+        module1_miscs = synth_miscs_total_and_each[1]
+        module2_miscs = synth_miscs_total_and_each[2]
+
+        # get control action values
+        us=self.get_u(ts,xs,ctrl_memorecord,
+              controller_action,
+              par, modules_name2pos, controller_name2pos)
+
+        # if no circuitry, return no plots
+        if (len(synth_genes) == 0):
+            return None
+
+        # set default time span if unspecified
+        if (tspan == None):
+            tspan = (ts[0], ts[-1])
+
+        # find values of gene transcription regulation functions
+        Fs1 = np.zeros((len(ts), len(module1_genes)))  # initialise
+        Fs2 = np.zeros((len(ts), len(module2_genes)))  # initialise
+        for i in range(0, len(ts)):
+            Fs1[i, :] = np.array(module1_F_calc(ts[i], xs[i, :], us[i], par, modules_name2pos)[:])
+            Fs2[i, :] = np.array(module2_F_calc(ts[i], xs[i, :], us[i], par, modules_name2pos)[:])
+
+        # Create ColumnDataSource object for the plot
+        data_for_column = {'t': ts}  # initialise with time axis
+        for i in range(0, len(module1_genes)):
+            data_for_column['F_' + module1_genes[i]] = Fs1[:, i]
+        for i in range(0, len(module2_genes)):
+            data_for_column['F_' + module2_genes[i]] = Fs2[:, i]
+
+        # PLOT
+        F_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="Transc. reg. funcs. F",
+            x_range=tspan,
+            y_range=(0, 1.05),
+            title='Gene transcription regulation',
+            tools="box_zoom,pan,hover,reset"
+        )
+        for gene in synth_genes:
+            F_figure.line(x='t', y='F_' + gene, source=data_for_column, line_width=1.5,
+                          line_color=modules_styles['colours'][gene], line_dash=modules_styles['dashes'][gene],
+                          legend_label='F_' + gene)
+        F_figure.legend.label_text_font_size = "8pt"
+        F_figure.legend.location = "top_right"
+        F_figure.legend.click_policy = 'hide'
+
+        return F_figure
+
+    # plot controller states and actions over time
+    def plot_controller(self, ts, xs, ctrl_memorecord, # time points and state vectors
+                        memos, dynvars, # controller memo and dynamic variable names
+                        controller_action, controller_update, # control action calculator and controller state update
+                        par, # model parameters
+                        modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
+                        controller_name2pos, # dictionary mapping controller species to their positions in the state vector
+                        controller_styles, # colours for the controller plots
+                        dimensions=(320, 180), tspan=None):
+
+        # get control action values
+        us=self.get_u(ts,xs,ctrl_memorecord,
+                controller_action,
+                par, modules_name2pos, controller_name2pos)
+
+        # set default time span if unspecified
+        if(tspan==None):
+            tspan=(ts[0], ts[-1])
+
+        # memory entry figure
+        if (len(memos) == 0):
+            memo_fig = None
+        else:
+            # Create a ColumnDataSource object for the plot
+            data_for_column = {'t': ts}
+            for i in range(0, len(memos)):
+                data_for_column[memos[i]] = ctrl_memorecord[:, i]
+            source = bkmodels.ColumnDataSource(data=data_for_column)
+
+            # PLOT
+            memo_fig = bkplot.figure(
+                frame_width=dimensions[0],
+                frame_height=dimensions[1],
+                x_axis_label="t, hours",
+                y_axis_label="Memo values",
+                x_range=tspan,
+                title='Controller memory',
+                tools="box_zoom,pan,hover,reset"
+            )
+            for i in range(0, len(memos)):
+                memo_fig.line(x='t', y=memos[i], source=source, line_width=1.5,
+                              line_color=controller_styles['colours'][memos[i]],
+                              line_dash=controller_styles['dashes'][memos[i]],
+                              legend_label=memos[i])
+            # legend formatting
+            memo_fig.legend.label_text_font_size = "8pt"
+            memo_fig.legend.location = "top_right"
+            memo_fig.legend.click_policy = 'hide'
+
+        # dynamic variables figure
+        if(len(dynvars)==0):
+            dynvar_fig=None
+        else:
+            # Create a ColumnDataSource object for the plot
+            data_for_column = {'t': ts}
+            for i in range(0, len(dynvars)):
+                data_for_column[dynvars[i]] = xs[:, controller_name2pos[dynvars[i]]]
+            source = bkmodels.ColumnDataSource(data=data_for_column)
+
+            # PLOT
+            dynvar_fig = bkplot.figure(
+                frame_width=dimensions[0],
+                frame_height=dimensions[1],
+                x_axis_label="t, hours",
+                y_axis_label="Dynamic variable values",
+                x_range=tspan,
+                title='Controller dynamic variables',
+                tools="box_zoom,pan,hover,reset"
+            )
+            for i in range(0, len(dynvars)):
+                dynvar_fig.line(x='t', y=dynvars[i], source=source, line_width=1.5,
+                              line_color=controller_styles['colours'][dynvars[i]],
+                              line_dash=controller_styles['dashes'][dynvars[i]],
+                              legend_label=dynvars[i])
+            # legend formatting
+            dynvar_fig.legend.label_text_font_size = "8pt"
+            dynvar_fig.legend.location = "top_right"
+            dynvar_fig.legend.click_policy = 'hide'
+
+        # controller action figure
+        u_fig = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="Control action",
+            x_range=tspan,
+            title='Controller action',
+            tools="box_zoom,pan,hover,reset"
+        )
+        u_fig.line(x=ts, y=us, line_width=1.5, line_color='blue', legend_label='u') # plot control action
+        # legend formatting
+        u_fig.legend.label_text_font_size = "8pt"
+        u_fig.legend.location = "top_right"
+        u_fig.legend.click_policy = 'hide'
+
+        return memo_fig, dynvar_fig, u_fig
+
 
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
     def plot_phys_variables(self, ts, xs,
@@ -666,12 +793,12 @@ class CellModelAuxiliary:
             tspan = (ts[0], ts[-1])
 
         # get cell variables' values over time
-        e, l, F_r, nu, _, T, D, D_nodeg = self.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts, xs, par, synth_genes, synth_miscs,
+        e, l, F_r, nu, _, T, D = self.get_e_l_Fr_nu_psi_T_D(ts, xs, par, synth_genes, synth_miscs,
                                                                             modules_name2pos)
 
         # Create a ColumnDataSource object for the plot
         data_for_column = {'t': np.array(ts), 'e': np.array(e), 'l': np.array(l), 'F_r': np.array(F_r),
-                           'ppGpp': np.array(1 / T), 'nu': np.array(nu), 'D': np.array(D), 'D_nodeg': np.array(D_nodeg)}
+                           'ppGpp': np.array(1 / T), 'nu': np.array(nu), 'D': np.array(D)}
         source = bkmodels.ColumnDataSource(data=data_for_column)
 
         # PLOT GROWTH RATE
@@ -763,7 +890,6 @@ class CellModelAuxiliary:
             tools="box_zoom,pan,hover,reset"
         )
         D_figure.line(x='t', y='D', source=source, line_width=1.5, line_color='blue', legend_label='D')
-        # D_figure.line(x='t', y='D_nodeg', source=source, line_width=1.5, line_color='red', legend_label='D (no deg.)')
         D_figure.legend.label_text_font_size = "8pt"
         D_figure.legend.location = "top_right"
         D_figure.legend.click_policy = 'hide'
@@ -771,8 +897,11 @@ class CellModelAuxiliary:
         return l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure
 
     # find values of different cellular variables
-    def get_e_l_Fr_nu_psi_T_D_Dnodeg(self, t, x,
-                                     par, synth_genes, synth_miscs, modules_name2pos):
+    def get_e_l_Fr_nu_psi_T_D(self, t, x,
+                                     par,
+                                     synth_genes,
+                                     synth_miscs,
+                                     modules_name2pos):
         # give the state vector entries meaningful names
         m_a = x[:, 0]  # metabolic gene mRNA
         m_r = x[:, 1]  # ribosomal gene mRNA
@@ -782,7 +911,7 @@ class CellModelAuxiliary:
         tu = x[:, 5]  # uncharged tRNAs
         s = x[:, 6]  # nutrient quality (constant)
         h = x[:, 7]  # chloramphenicol concentration (constant)
-        x_het = x[:, 8:8 + 2 * len(synth_genes)]  # heterologous protein concentrations
+        x_het = x[:, 8:8 + 2 * len(synth_genes)]  # heterologous mRNA and protein concentrations
         misc = x[:, 8 + 2 * len(synth_genes):8 + 2 * len(synth_genes) + len(synth_miscs)]  # miscellaneous species
 
         # vector of Synthetic Gene Parameters 4 JAX
@@ -840,625 +969,21 @@ class CellModelAuxiliary:
 
         F_r = Fr_calc(par, T)  # ribosomal gene transcription regulation function
 
-        # RC denominator, as it would be without active protein degradation by the protease
-        D_nodeg = H * (1 + (1/(1-par['phi_q'])) * m_notq_div_k_notq)
-        return e, l, F_r, nu, jnp.multiply(psi, l), T, D, D_nodeg
+        return e, l, F_r, nu, jnp.multiply(psi, l), T, D
 
-    # PLOT RESULTS FOR SEVERAL TRAJECTORIES AT ONCE (SAME TIME AXIS)
-    # plot mRNA, protein and tRNA concentrations over time
-    def plot_native_concentrations_multiple(self, ts, xss,
-                                            par, synth_genes,  # model parameters, list of circuit genes
-                                            dimensions=(320, 180), tspan=None,
-                                            simtraj_alpha=0.1):
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # Create ColumnDataSource objects for the plot
-        sources = {}
-        for i in range(0, len(xss)):
-            # Create a ColumnDataSource object for the plot
-            sources[i] = bkmodels.ColumnDataSource(data={
-                't': ts,
-                'm_a': xss[i, :, 0],  # metabolic mRNA
-                'm_r': xss[i, :, 1],  # ribosomal mRNA
-                'p_a': xss[i, :, 2],  # metabolic protein
-                'R': xss[i, :, 3],  # ribosomal protein
-                'tc': xss[i, :, 4],  # charged tRNA
-                'tu': xss[i, :, 5],  # uncharged tRNA
-                's': xss[i, :, 6],  # nutrient quality
-                'h': xss[i, :, 7],  # chloramphenicol concentration
-                'm_het': np.sum(xss[i, :, 8:8 + len(synth_genes)], axis=1),  # heterologous mRNA
-                'p_het': np.sum(xss[i, :, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=1),  # heterologous protein
-            })
-            
-        # Create a ColumnDataSource object for plotting the average trajectory
-        source_avg = bkmodels.ColumnDataSource(data={
-            't': ts,
-            'm_a': np.mean(xss[:, :, 0], axis=0),  # metabolic mRNA
-            'm_r': np.mean(xss[:, :, 1], axis=0),  # ribosomal mRNA
-            'p_a': np.mean(xss[:, :, 2], axis=0),  # metabolic protein
-            'R': np.mean(xss[:, :, 3], axis=0),  # ribosomal protein
-            'tc': np.mean(xss[:, :, 4], axis=0),  # charged tRNA
-            'tu': np.mean(xss[:, :, 5], axis=0),  # uncharged tRNA
-            's': np.mean(xss[:, :, 6], axis=0),  # nutrient quality
-            'h': np.mean(xss[:, :, 7], axis=0),  # chloramphenicol concentration
-            'm_het': np.sum(np.mean(xss[:, :, 8:8 + len(synth_genes)], axis=0), axis=1),  # heterologous mRNA
-            'p_het': np.sum(np.mean(xss[:, :, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=0), axis=1),  # heterologous protein
-        })
-
-        # PLOT mRNA CONCENTRATIONS
-        mRNA_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="mRNA conc., nM",
-            x_range=tspan,
-            title='mRNA concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            mRNA_figure.line(x='t', y='m_a', source=sources[i], line_width=1.5, line_color=self.gene_colours['a'],
-                             legend_label='m_a', line_alpha=simtraj_alpha)  # plot metabolic mRNA concentrations
-            mRNA_figure.line(x='t', y='m_r', source=sources[i], line_width=1.5, line_color=self.gene_colours['r'],
-                                legend_label='m_r', line_alpha=simtraj_alpha)  # plot ribosomal mRNA concentrations
-            mRNA_figure.line(x='t', y='m_het', source=sources[i], line_width=1.5, line_color=self.gene_colours['het'],
-                                legend_label='m_het', line_alpha=simtraj_alpha)  # plot heterologous mRNA concentrations
-        # plot average trajectory
-        mRNA_figure.line(x='t', y='m_a', source=source_avg, line_width=1.5, line_color=self.gene_colours['a'],
-                            legend_label='m_a')  # plot metabolic mRNA concentrations
-        mRNA_figure.line(x='t', y='m_r', source=source_avg, line_width=1.5, line_color=self.gene_colours['r'],
-                            legend_label='m_r')  # plot ribosomal mRNA concentrations
-        mRNA_figure.line(x='t', y='m_het', source=source_avg, line_width=1.5, line_color=self.gene_colours['het'],
-                            legend_label='m_het')  # plot heterologous mRNA concentrations
-        # add and format the legend
-        mRNA_figure.legend.label_text_font_size = "8pt"
-        mRNA_figure.legend.location = "top_right"
-        mRNA_figure.legend.click_policy = 'hide'
-        
-        # PLOT protein CONCENTRATIONS
-        protein_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Protein conc., nM",
-            x_range=tspan,
-            title='Protein concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            protein_figure.line(x='t', y='p_a', source=sources[i], line_width=1.5, line_color=self.gene_colours['a'],
-                                legend_label='p_a', line_alpha=simtraj_alpha)
-            protein_figure.line(x='t', y='R', source=sources[i], line_width=1.5, line_color=self.gene_colours['r'],
-                                legend_label='R', line_alpha=simtraj_alpha)
-            protein_figure.line(x='t', y='p_het', source=sources[i], line_width=1.5, line_color=self.gene_colours['het'],
-                                legend_label='p_het', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        protein_figure.line(x='t', y='p_a', source=source_avg, line_width=1.5, line_color=self.gene_colours['a'],
-                            legend_label='p_a')
-        protein_figure.line(x='t', y='R', source=source_avg, line_width=1.5, line_color=self.gene_colours['r'],
-                            legend_label='R')
-        protein_figure.line(x='t', y='p_het', source=source_avg, line_width=1.5, line_color=self.gene_colours['het'],
-                            legend_label='p_het')
-        # add and format the legend
-        protein_figure.legend.label_text_font_size = "8pt"
-        protein_figure.legend.location = "top_right"
-        protein_figure.legend.click_policy = 'hide'
-        
-        # PLOT tRNA CONCENTRATIONS
-        tRNA_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="tRNA conc., nM",
-            x_range=tspan,
-            title='tRNA concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            tRNA_figure.line(x='t', y='tc', source=sources[i], line_width=1.5, line_color=self.tRNA_colours['tc'],
-                                legend_label='tc', line_alpha=simtraj_alpha)
-            tRNA_figure.line(x='t', y='tu', source=sources[i], line_width=1.5, line_color=self.tRNA_colours['tu'],
-                                legend_label='tu', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        tRNA_figure.line(x='t', y='tc', source=source_avg, line_width=1.5, line_color=self.tRNA_colours['tc'],
-                            legend_label='tc')
-        tRNA_figure.line(x='t', y='tu', source=source_avg, line_width=1.5, line_color=self.tRNA_colours['tu'],
-                            legend_label='tu')
-        # add and format the legend
-        tRNA_figure.legend.label_text_font_size = "8pt"
-        tRNA_figure.legend.location = "top_right"
-        tRNA_figure.legend.click_policy = 'hide'
-        
-        # PLOT INTRACELLULAR CHLORAMPHENICOL CONCENTRATION
-        h_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="h, nM",
-            x_range=tspan,
-            title='Intracellular chloramphenicol concentration',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            h_figure.line(x='t', y='h', source=sources[i], line_width=1.5, line_color=self.gene_colours['h'],
-                            legend_label='h', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        h_figure.line(x='t', y='h', source=source_avg, line_width=1.5, line_color=self.gene_colours['h'],
-                        legend_label='h')
-        # add and format the legend
-        h_figure.legend.label_text_font_size = "8pt"
-        h_figure.legend.location = "top_right"
-        h_figure.legend.click_policy = 'hide'
-        
-        return mRNA_figure, protein_figure, tRNA_figure, h_figure
-
-
-    # plot concentrations for the synthetic circuits
-    def plot_circuit_concentrations_multiple(self, ts, xss,
-                                             par, synth_genes, synth_miscs, modules_name2pos,
-                                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-                                             circuit_styles,  # colours for the circuit plots
-                                             dimensions=(320, 180), tspan=None,
-                                             simtraj_alpha=0.1):
-        # if no circuitry at all, return no plots
-        if (len(synth_genes) + len(synth_miscs) == 0):
-            return None, None, None
-
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # Create ColumnDataSource objects for the plot
-        sources = {}
-        for i in range(0, len(xss)):
-            # Create a ColumnDataSource object for the plot
-            data_for_column = {'t': ts}
-            # record synthetic mRNA and protein concentrations
-            for j in range(0, len(synth_genes)):
-                data_for_column['m_' + synth_genes[j]] = xss[i, :, 8 + j]
-                data_for_column['p_' + synth_genes[j]] = xss[i, :, 8 + len(synth_genes) + j]
-            # record miscellaneous species' concentrations
-            for j in range(0, len(synth_miscs)):
-                data_for_column[synth_miscs[j]] = xss[i, :, 8 + len(synth_genes) * 2 + j]
-            sources[i] = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # Create a ColumnDataSource object for plotting the average trajectory
-        data_for_column = {'t': ts}
-        # record synthetic mRNA and protein concentrations
-        for j in range(0, len(synth_genes)):
-            data_for_column['m_' + synth_genes[j]] = np.mean(xss[:, :, 8 + j], axis=0)
-            data_for_column['p_' + synth_genes[j]] = np.mean(xss[:, :, 8 + len(synth_genes) + j], axis=0)
-        # record miscellaneous species' concentrations
-        for j in range(0, len(synth_miscs)):
-            data_for_column[synth_miscs[j]] = np.mean(xss[:, :, 8 + len(synth_genes) * 2 + j], axis=0)
-        source_avg = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
-        if (len(synth_genes) > 0):
-            # mRNAs
-            mRNA_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="mRNA conc., nM",
-                x_range=tspan,
-                title='mRNA concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            # plot simulated trajectories
-            for i in range(0, len(xss)):
-                for gene in synth_genes:
-                    mRNA_figure.line(x='t', y='m_' + gene, source=sources[i], line_width=1.5,
-                                     line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                                     legend_label='m_' + gene, line_alpha=simtraj_alpha)
-            # plot average trajectory
-            for gene in synth_genes:
-                mRNA_figure.line(x='t', y='m_' + gene, source=source_avg, line_width=1.5,
-                                 line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                                 legend_label='m_' + gene)
-            # add and format the legend
-            mRNA_figure.legend.label_text_font_size = "8pt"
-            mRNA_figure.legend.location = 'top_left'
-            mRNA_figure.legend.click_policy = 'hide'
-
-            # proteins
-            protein_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="Protein conc., nM",
-                x_range=tspan,
-                title='Protein concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            # plot simulated trajectories
-            for i in range(0, len(xss)):
-                for gene in synth_genes:
-                    protein_figure.line(x='t', y='p_' + gene, source=sources[i], line_width=1.5,
-                                        line_color=circuit_styles['colours'][gene],
-                                        line_dash=circuit_styles['dashes'][gene],
-                                        legend_label='p_' + gene, line_alpha=simtraj_alpha)
-            # plot average trajectory
-            for gene in synth_genes:
-                protein_figure.line(x='t', y='p_' + gene, source=source_avg, line_width=1.5,
-                                    line_color=circuit_styles['colours'][gene],
-                                    line_dash=circuit_styles['dashes'][gene],
-                                    legend_label='p_' + gene)
-            # add and format the legend
-            protein_figure.legend.label_text_font_size = "8pt"
-            protein_figure.legend.location = 'top_left'
-            protein_figure.legend.click_policy = 'hide'
-        else:
-            mRNA_figure = None
-            protein_figure = None
-
-        # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
-        if (len(synth_miscs) > 0):
-            misc_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="Conc., nM",
-                x_range=tspan,
-                title='Miscellaneous species concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            # plot simulated trajectories
-            for i in range(0, len(xss)):
-                for misc in synth_miscs:
-                    misc_figure.line(x='t', y=misc, source=sources[i], line_width=1.5,
-                                     line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
-                                     legend_label=misc, line_alpha=simtraj_alpha)
-            # plot average trajectory
-            for misc in synth_miscs:
-                misc_figure.line(x='t', y=misc, source=source_avg, line_width=1.5,
-                                 line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
-                                 legend_label=misc)
-            # add and format the legend
-            misc_figure.legend.label_text_font_size = "8pt"
-            misc_figure.legend.location = 'top_left'
-            misc_figure.legend.click_policy = 'hide'
-        else:
-            misc_figure = None
-
-        return mRNA_figure, protein_figure, misc_figure
-
-
-    # plot transcription regulation function values for the circuit's genes
-    def plot_circuit_regulation_multiple(self, ts, xss,
-                                         par, circuit_F_calc,
-                                            # function calculating the transcription regulation functions for the circuit
-                                            synth_genes, synth_miscs, modules_name2pos,
-                                            # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-                                            circuit_styles,  # colours for the circuit plots
-                                            dimensions=(320, 180), tspan=None,
-                                            simtraj_alpha=0.1):
-        # if no circuitry at all, return no plots
-        if (len(synth_genes) + len(synth_miscs) == 0):
-            return None
-
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # find values of gene transcription regulation functions and create ColumnDataSource objects for the plot
-        sources = {}
-        for i in range(0, len(xss)):
-            Fs = np.zeros((len(ts), len(synth_genes)))  # initialise
-            for k in range(0, len(ts)):
-                Fs[k, :] = np.array(circuit_F_calc(ts[k], xss[i, k, :], par, modules_name2pos)[:])
-
-            # Create a ColumnDataSource object for the plot
-            data_for_column = {'t': ts}
-            for j in range(0, len(synth_genes)):
-                data_for_column['F_' + synth_genes[j]] = Fs[:, j]
-            sources[i] = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # Create a ColumnDataSource object for plotting the average trajectory
-        data_for_column = {'t': ts}
-        for j in range(0, len(synth_genes)):
-            data_for_column['F_' + synth_genes[j]] = np.zeros_like(ts)
-        # add gene transcription regulation functions for different trajectories together
-        for i in range(0, len(xss)):
-            for j in range(0, len(synth_genes)):
-                data_for_column['F_' + synth_genes[j]] += np.array(sources[i].data['F_' + synth_genes[j]])
-        # divide by the number of trajectories to get the average
-        for j in range(0, len(synth_genes)):
-            data_for_column['F_' + synth_genes[j]] /= len(xss)
-        source_avg = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # PLOT TRANSCRIPTION REGULATION FUNCTIONS
-        F_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Transc. reg. funcs. F",
-            x_range=tspan,
-            y_range=(0, 1.05),
-            title='Gene transcription regulation',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            for gene in synth_genes:
-                F_figure.line(x='t', y='F_' + gene, source=sources[i], line_width=1.5,
-                              line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                              legend_label='F_' + gene, line_alpha=simtraj_alpha)
-        # plot average trajectory
-        for gene in synth_genes:
-            F_figure.line(x='t', y='F_' + gene, source=source_avg, line_width=1.5,
-                          line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                          legend_label='F_' + gene)
-        # add and format the legend
-        F_figure.legend.label_text_font_size = "8pt"
-        F_figure.legend.location = 'top_left'
-        F_figure.legend.click_policy = 'hide'
-
-        return F_figure
-
-    # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
-    def plot_phys_variables_multiple(self, ts, xss,
-                            par, synth_genes, synth_miscs, modules_name2pos,
-                            # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-                            dimensions=(320, 180), tspan=None,
-                            simtraj_alpha=0.1):
-        # if no circuitry at all, return no plots
-        if (len(synth_genes) + len(synth_miscs) == 0):
-            return None, None, None, None, None, None
-
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # get cell variables' values over time and create ColumnDataSource objects for the plot
-        sources = {}
-        for i in range(0,len(xss)):
-            e, l, F_r, nu, psi, T, D, D_nodeg = self.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts, xss[i, :, :],
-                                                                                    par, synth_genes, synth_miscs, modules_name2pos)
-            # Create a ColumnDataSource object for the plot
-            sources[i] = bkmodels.ColumnDataSource(data={
-                't': np.array(ts),
-                'e': np.array(e),
-                'l': np.array(l),
-                'F_r': np.array(F_r),
-                'nu': np.array(nu),
-                'psi': np.array(psi),
-                '1/T': np.array(1/T),
-                'D': np.array(D),
-                'D_nodeg': np.array(D_nodeg)
-            })
-
-        # Create a ColumnDataSource object for plotting the average trajectory
-        data_for_column = {'t': ts,
-                           'e': np.zeros_like(ts),
-                           'l': np.zeros_like(ts),
-                           'F_r': np.zeros_like(ts),
-                           'nu': np.zeros_like(ts),
-                           'psi': np.zeros_like(ts),
-                           '1/T': np.zeros_like(ts),
-                           'D': np.zeros_like(ts),
-                           'D_nodeg': np.zeros_like(ts)}
-        # add physiological variables for different trajectories together
-        for i in range(0, len(xss)):
-            data_for_column['e'] += np.array(sources[i].data['e'])
-            data_for_column['l'] += np.array(sources[i].data['l'])
-            data_for_column['F_r'] += np.array(sources[i].data['F_r'])
-            data_for_column['nu'] += np.array(sources[i].data['nu'])
-            data_for_column['psi'] += np.array(sources[i].data['psi'])
-            data_for_column['1/T'] += np.array(sources[i].data['1/T'])
-            data_for_column['D'] += np.array(sources[i].data['D'])
-            data_for_column['D_nodeg'] += np.array(sources[i].data['D_nodeg'])
-        # divide by the number of trajectories to get the average
-        data_for_column['e'] /= len(xss)
-        data_for_column['l'] /= len(xss)
-        data_for_column['F_r'] /= len(xss)
-        data_for_column['nu'] /= len(xss)
-        data_for_column['psi'] /= len(xss)
-        data_for_column['1/T'] /= len(xss)
-        data_for_column['D'] /= len(xss)
-        data_for_column['D_nodeg'] /= len(xss)
-        source_avg = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # PLOT GROWTH RATE
-        l_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Growth rate, 1/h",
-            x_range=tspan,
-            title='Growth rate',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            l_figure.line(x='t', y='l', source=sources[i], line_width=1.5, line_color='blue', legend_label='l', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        l_figure.line(x='t', y='l', source=source_avg, line_width=1.5, line_color='blue', legend_label='l')
-        # add and format the legend
-        l_figure.legend.label_text_font_size = "8pt"
-        l_figure.legend.location = 'top_left'
-        l_figure.legend.click_policy = 'hide'
-
-        # PLOT TRANSLATION ELONGATION RATE
-        e_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Translation elongation rate, aa/s",
-            x_range=tspan,
-            title='Translation elongation rate',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            e_figure.line(x='t', y='e', source=sources[i], line_width=1.5, line_color='blue', legend_label='e', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        e_figure.line(x='t', y='e', source=source_avg, line_width=1.5, line_color='blue', legend_label='e')
-        # add and format the legend
-        e_figure.legend.label_text_font_size = "8pt"
-        e_figure.legend.location = 'top_left'
-        e_figure.legend.click_policy = 'hide'
-
-        # PLOT RIBOSOMAL GENE TRANSCRIPTION REGULATION FUNCTION
-        F_r_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Ribosomal gene transc. reg. func. F_r",
-            x_range=tspan,
-            y_range=(0, 1.05),
-            title='Ribosomal gene transcription regulation function',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            F_r_figure.line(x='t', y='F_r', source=sources[i], line_width=1.5, line_color='blue', legend_label='F_r', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        F_r_figure.line(x='t', y='F_r', source=source_avg, line_width=1.5, line_color='blue', legend_label='F_r')
-        # add and format the legend
-        F_r_figure.legend.label_text_font_size = "8pt"
-        F_r_figure.legend.location = 'top_left'
-        F_r_figure.legend.click_policy = 'hide'
-
-        # PLOT ppGpp CONCENTRATION
-        ppGpp_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="[ppGpp], nM",
-            x_range=tspan,
-            title='ppGpp concentration',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            ppGpp_figure.line(x='t', y='1/T', source=sources[i], line_width=1.5, line_color='blue', legend_label='1/T', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        ppGpp_figure.line(x='t', y='1/T', source=source_avg, line_width=1.5, line_color='blue', legend_label='1/T')
-        # add and format the legend
-        ppGpp_figure.legend.label_text_font_size = "8pt"
-        ppGpp_figure.legend.location = 'top_left'
-        ppGpp_figure.legend.click_policy = 'hide'
-
-        # PLOT tRNA CHARGING RATE
-        nu_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="tRNA charging rate, 1/s",
-            x_range=tspan,
-            title='tRNA charging rate',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            nu_figure.line(x='t', y='nu', source=sources[i], line_width=1.5, line_color='blue', legend_label='nu', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        nu_figure.line(x='t', y='nu', source=source_avg, line_width=1.5, line_color='blue', legend_label='nu')
-
-        # PLOT RC DENOMINATOR
-        D_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="RC denominator",
-            x_range=tspan,
-            title='RC denominator',
-            tools="box_zoom,pan,hover,reset"
-        )
-        # plot simulated trajectories
-        for i in range(0, len(xss)):
-            D_figure.line(x='t', y='D', source=sources[i], line_width=1.5, line_color='blue', legend_label='D', line_alpha=simtraj_alpha)
-            #D_figure.line(x='t', y='D_nodeg', source=sources[i], line_width=1.5, line_color='red', legend_label='D_nodeg', line_alpha=simtraj_alpha)
-        # plot average trajectory
-        D_figure.line(x='t', y='D', source=source_avg, line_width=1.5, line_color='blue', legend_label='D')
-        # D_figure.line(x='t', y='D_nodeg', source=source_avg, line_width=1.5, line_color='red', legend_label='D_nodeg')
-        # add and format the legend
-        D_figure.legend.label_text_font_size = "8pt"
-        D_figure.legend.location = 'top_left'
-        D_figure.legend.click_policy = 'hide'
-
-        return l_figure, e_figure, F_r_figure, ppGpp_figure, nu_figure, D_figure
+    # find control inputs
+    def get_u(self, t, x,
+              ctrl_memo, 
+              controller_action,
+              par, 
+              modules_name2pos, controller_name2pos):
+        u = np.zeros(len(t))
+        for i in range(0, len(t)):
+            u[i] = controller_action(t[i], x[i, :], ctrl_memo[i], par, modules_name2pos, controller_name2pos)
+        return u
 
 
 # DETERMINISTIC SIMULATION ---------------------------------------------------------------------------------------------
-def ode_sim_loop(par,  # dictionary with model parameters
-            ode_solver,  # ODE function for the cell with the synthetic gene circuit
-            controller_update,  # function for updating the controller memory
-            x0,  # initial condition VECTOR
-            ctrl_memo0,  # initial controller memory
-            num_synth_genes, num_synth_miscs, # number of synthetic genes and miscellaneous species in the circuit
-            synth_genes, synth_miscs, # dictionary with circuit gene and miscellaneous specie name
-            modules_name2pos, controller_name2pos, # variable name to position in the state vector decoders
-            sgp4j, # some synthetic gene parameters in jax.array form - for efficient simulation
-            tf,  # simulation time frame
-            meastimestep   # output measurement time window
-            ):
-    # define the arguments for finding the next state vector
-    args = (par,
-            modules_name2pos, controller_name2pos,
-            num_synth_genes, num_synth_miscs,
-            sgp4j)
-
-    # time points at which we save the solution
-    ts = jnp.arange(tf[0], tf[1] + meastimestep / 2, meastimestep)
-
-    # make the retrieval of next simulator state a lambda-function for jax.lax.scanning
-    scan_step = lambda sim_state, t: ode_sim_step(sim_state, t,
-                                                  meastimestep,
-                                                  args,
-                                                  ode_solver, controller_update)
-
-    # define the jac.lax.scan function
-    ode_scan = lambda sim_state_rec0, ts: jax.lax.scan(scan_step, sim_state_rec0, ts)
-    ode_scan_jit = jax.jit(ode_scan)
-
-    # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
-    sim_state0 = {'t': tf[0], 'x': x0, 'ctrl_memo': ctrl_memo0,  # time, state vector, controller memory
-                  'tf': tf  # overall simulation time frame
-                  }
-
-    # run the simulation
-    _, sim_outcome = ode_scan_jit(sim_state0, ts)
-
-    # extract the simulation outcomes
-    t= sim_outcome[0]
-    xs = sim_outcome[1]
-    ctrl_memos = sim_outcome[2]
-
-    # return the simulation outcomes
-    return t, xs, ctrl_memos
-
-
-def ode_sim_step(sim_state, t,
-                 meastimestep,
-                 args,
-                 ode_solver, controller_update):
-    # get next measurement time
-    next_t = sim_state['t'] + meastimestep
-
-    # simulate the ODE until the next measurement
-    next_x = ode_solver(tf=(t, next_t),
-                        x0=sim_state['x'],
-                        args=args+(sim_state['ctrl_memo'],))
-
-    # update the controller memory
-    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], args)
-
-    # update the overall simulation state
-    next_sim_state = {'t': t+meastimestep,
-                      'x': next_x,
-                      'ctrl_memo': next_ctrl_memo,
-                      'tf': sim_state['tf']}
-
-    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'])
-
-
 # ode
 def ode(t, x, # simulation time and state vector
         #ctrl_memo, # controller memory
@@ -1561,7 +1086,7 @@ def ode(t, x, # simulation time and state vector
                     +
                     # add synthetic mRNA ODEs
                     module1_ode_value[0:num_synth_genes1] + module2_ode_value[0:num_synth_genes2]
-                     +
+                    +
                     # add synthetic protein ODEs
                     module1_ode_value[num_synth_genes1:num_synth_genes1*2] + module2_ode_value[num_synth_genes2:num_synth_genes2*2]
                     +
@@ -1572,6 +1097,84 @@ def ode(t, x, # simulation time and state vector
                     controller_ode(t, x, e, l, R, k_het, D, p_prot, par, modules_name2pos, controller_name2pos)
                      )
     return dxdt
+
+# ode simulation loop
+def ode_sim_loop(par,  # dictionary with model parameters
+            ode_solver,  # ODE function for the cell with the synthetic gene circuit
+            controller_update,  # function for updating the controller memory
+            controller_action,  # function for calculating the control action
+            x0,  # initial condition VECTOR
+            ctrl_memo0,  # initial controller memory
+            num_synth_genes, num_synth_miscs, # number of synthetic genes and miscellaneous species in the circuit
+            modules_name2pos, controller_name2pos, # variable name to position in the state vector decoders
+            sgp4j, # some synthetic gene parameters in jax.array form - for efficient simulation
+            tf,  # simulation time frame
+            meastimestep   # output measurement time window
+            ):
+    # define the arguments for finding the next state vector
+    args = (par,
+            modules_name2pos, controller_name2pos,
+            num_synth_genes, num_synth_miscs,
+            sgp4j)
+
+    # time points at which we save the solution
+    ts = jnp.arange(tf[0], tf[1] + meastimestep / 2, meastimestep)
+
+    # make the retrieval of next simulator state a lambda-function for jax.lax.scanning
+    scan_step = lambda sim_state, t: ode_sim_step(sim_state, t,
+                                                  meastimestep,
+                                                  args,
+                                                  ode_solver,
+                                                  controller_update)
+
+    # define the jac.lax.scan function
+    ode_scan = lambda sim_state_rec0, ts: jax.lax.scan(scan_step, sim_state_rec0, ts)
+    ode_scan_jit = jax.jit(ode_scan)
+
+    # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
+    sim_state0 = {'t': tf[0], 'x': x0,  # time, state vector
+                  'ctrl_memo': jnp.array(ctrl_memo0),  # controller memory (jnp array format)
+                  'tf': tf  # overall simulation time frame
+                  }
+
+    # run the simulation
+    _, sim_outcome = ode_scan_jit(sim_state0, ts)
+
+    # extract the simulation outcomes
+    t= sim_outcome[0]
+    xs = sim_outcome[1]
+    ctrl_memorecord = sim_outcome[2]
+
+    # return the simulation outcomes
+    return t, xs, ctrl_memorecord
+
+# one step of the ode simulation loop (from one measurement to the next)
+def ode_sim_step(sim_state, t,
+                 meastimestep,
+                 args,
+                 ode_solver,
+                 controller_update):
+
+    # get next measurement time
+    next_t = sim_state['t'] + meastimestep
+
+    # simulate the ODE until the next measurement
+    next_x = ode_solver(tf=(t, next_t),
+                        x0=sim_state['x'],
+                        args=args+(sim_state['ctrl_memo'],))
+
+    # update the controller memory
+    modules_name2pos = args[1]
+    controller_name2pos = args[2]
+    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], modules_name2pos, controller_name2pos)
+
+    # update the overall simulation state
+    next_sim_state = {'t': t+meastimestep,
+                      'x': next_x,
+                      'ctrl_memo': next_ctrl_memo,
+                      'tf': sim_state['tf']}
+
+    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'])
 
 
 # ODE SOLVER INITIALISERS ----------------------------------------------------------------------------------------------
@@ -1610,9 +1213,10 @@ def main():
     # load synthetic genetic modules and the controller
     ode, \
     module1_F_calc, module2_F_calc, controller_action, controller_update, \
-    par, init_conds, \
+    par, init_conds, controller_memo0, \
     synth_genes_total_and_each, synth_miscs_total_and_each, \
-    modules_name2pos, modules_styles, controller_name2pos, \
+    controller_memos, controller_dynvars, \
+    modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
     module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
         # module 1
         gms.constfp_initialise,  # function initialising the circuit
@@ -1649,7 +1253,7 @@ def main():
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
-    tf = (0, 30)  # simulation time frame
+    tf = (0, 20)  # simulation time frame
 
     # measurement time step
     meastimestep = 0.1  # hours
@@ -1661,26 +1265,26 @@ def main():
 
     # solve ODE
     timer= time.time()
-    ts_jnp, xs_jnp, ctrl_memos_jnp = ode_sim_loop(par,
-                                     ode_solver, controller_update,
-                                     cellmodel_auxil.x0_from_init_conds(init_conds,
-                                                                        par,
-                                                                        synth_genes, synth_miscs,
-                                                                        modules_name2pos, controller_name2pos),
-                                     jnp.array([]),  # empty controller memory
-                       (len(synth_genes),len(module1_genes), len(module2_genes)),  # number of synthetic genes
-                       (len(synth_miscs),len(module1_miscs), len(module2_miscs)),   # number of miscellaneous species
-                                     # number of synthetic genes and miscellaneous species
-                                     synth_genes, synth_miscs,  # lists of synthetic genes and miscellaneous species
-                                     modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
-                                     cellmodel_auxil.synth_gene_params_for_jax(par,synth_genes),  # synthetic gene parameters in jax.array form
-                                     tf, meastimestep,  # simulation time frame and measurement time step
-                                     )
+    ts_jnp, xs_jnp, ctrl_memorecord_jnp = ode_sim_loop(par,
+                                                  ode_solver,
+                                                  controller_update, controller_action,
+                                                  cellmodel_auxil.x0_from_init_conds(init_conds,
+                                                                                     par,
+                                                                                     synth_genes, synth_miscs, controller_dynvars,
+                                                                                     modules_name2pos,
+                                                                                     controller_name2pos),
+                                                  controller_memo0,  # initial controller memory record
+                                                  (len(synth_genes), len(module1_genes), len(module2_genes)), # number of synthetic genes
+                                                  (len(synth_miscs), len(module1_miscs), len(module2_miscs)), # number of miscellaneous species
+                                                  modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
+                                                  cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes), # synthetic gene parameters in jax.array form
+                                                  tf, meastimestep,  # simulation time frame and measurement time step
+                                                  )
 
     # convert simulation results to numpy arrays
     ts = np.array(ts_jnp)
     xs = np.array(xs_jnp)
-    ctrl_memos = np.array(ctrl_memos_jnp)
+    ctrl_memorecord = np.array(ctrl_memorecord_jnp)
 
     print('Simulation time: ', time.time()-timer, ' s')
     
@@ -1694,8 +1298,46 @@ def main():
                                                                                                  synth_genes,
                                                                                                  synth_miscs,
                                                                                                  modules_name2pos)  # plot simulation results
+    l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure = cellmodel_auxil.plot_phys_variables(ts,
+                                                                                                           xs,
+                                                                                                           par,
+                                                                                                           synth_genes,
+                                                                                                           synth_miscs,
+                                                                                                           modules_name2pos)  # plot simulation results
     bkplot.save(bklayouts.grid([[mass_fig, nat_mrna_fig, nat_prot_fig],
-                                [nat_trna_fig, h_fig, None]]))
+                                [nat_trna_fig, h_fig, l_figure],
+                                [e_figure, Fr_figure, ppGpp_figure]]))
+
+    # PLOT - SYNTHETIC CIRCUITS AND CONTROLLER
+    bkplot.output_file(filename="circuit_sim.html",
+                       title="Synthetic Circuit Simulation")  # set up bokeh output file
+    # plot synthetic circuit concentrations
+    mRNA_fig, prot_fig, misc_fig = cellmodel_auxil.plot_circuit_concentrations(ts, xs,
+                                                                              par, synth_genes, synth_miscs,
+                                                                              modules_name2pos,
+                                                                              modules_styles)  # plot simulation results
+    # plot synthetic circuit regulation functions
+    F_fig = cellmodel_auxil.plot_circuit_regulation(ts, xs, ctrl_memorecord, # time points and state vectors
+                                                    module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
+                                                    controller_action, # control action calculator
+                                                    par, # model parameters
+                                                    synth_genes_total_and_each,     # list of synthetic genes - total and for each module
+                                                    synth_miscs_total_and_each,     # list of synthetic miscellaneous species - total and for each module
+                                                    modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
+                                                    controller_name2pos, # dictionary mapping controller species to their positions in the state vector
+                                                    modules_styles)  # plot simulation results
+    # plot controller memory, dynamic variables and actions
+    ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs, ctrl_memorecord,
+                                                                                 controller_memos, controller_dynvars,
+                                                                                 controller_action, controller_update,
+                                                                                 par,
+                                                                                 modules_name2pos, controller_name2pos,
+                                                                                 controller_styles)
+
+    # save the plots
+    bkplot.save(bklayouts.grid([[mRNA_fig, prot_fig, misc_fig],
+                                [F_fig, None, None],
+                                [ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig]]))
     
     return
 

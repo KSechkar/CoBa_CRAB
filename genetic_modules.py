@@ -118,18 +118,21 @@ def constfp_initialise():
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
-    default_palette = ["#0072BD", "#D95319", "#4DBEEE", "#A2142F", "#FF00FF"]
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
     default_dash = ['solid']
     # match default palette to genes and miscellaneous species, looping over the five colours we defined
     circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    # gene styles
     for i in range(0, len(genes)):
         circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
         circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    # miscellaneous species styles
     for i in range(len(genes), len(genes) + len(miscs)):
         circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
         circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
 
     # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    circuit_styles['colours']['ofp']='#00af00ff'
     # -------- ...TO HERE
 
     return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
@@ -231,7 +234,7 @@ def cicc_initialise():
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
-    default_palette = ["#0072BD", "#D95319", "#4DBEEE", "#A2142F", "#FF00FF"]
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
     default_dash = ['solid']
     # match default palette to genes and miscellaneous species, looping over the five colours we defined
     circuit_styles={'colours':{}, 'dashes':{}} # initialise dictionary

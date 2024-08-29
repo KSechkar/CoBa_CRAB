@@ -18,7 +18,8 @@ from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts
 import time
 
 # CIRCUIT AND EXTERNAL INPUT IMPORTS -----------------------------------------------------------------------------------
-import synthetic_circuits as circuits
+import genetic_modules as gms
+import controllers as ctrls
 
 
 # CELL MODEL FUNCTIONS -------------------------------------------------------------------------------------------------
@@ -68,59 +69,126 @@ class CellModelAuxiliary:
 
     # PROCESS SYNTHETIC CIRCUIT MODULE
     # add synthetic circuit to the cell model
-    def add_circuit(self,
-                    circuit_initialiser,  # function initialising the circuit
-                    circuit_ode,  # function defining the circuit ODEs
-                    circuit_F_calc,  # function calculating the circuit genes' transcription regulation functions
-                    cellmodel_par, cellmodel_init_conds,  # host cell model parameters and initial conditions
-                    # optional support for hybrid simulations
-                    circuit_v=None
-                    ):
-        # call circuit initialiser
-        circuit_par, circuit_init_conds, circuit_genes, circuit_miscs, circuit_name2pos, circuit_styles = circuit_initialiser()
+    def add_modules_and_controller(self,
+                                   # module 1
+                                   module1_initialiser,  # function initialising the circuit
+                                   module1_ode,  # function defining the circuit ODEs
+                                   module1_F_calc, # function calculating the circuit genes' transcription regulation functions
+                                   # module 2
+                                   module2_initialiser,  # function initialising the circuit
+                                   module2_ode,  # function defining the circuit ODEs
+                                   module2_F_calc, # function calculating the circuit genes' transcription regulation functions
+                                   # controller
+                                   controller_initialiser,  # function initialising the controller
+                                   controller_action,  # function calculating the control action
+                                   controller_ode,  # function defining the controller ODEs
+                                   controller_update,  # function updating the controller based on measurements
+                                   # cell model parameters and initial conditions
+                                   cellmodel_par, cellmodel_init_conds,
+                                   # host cell model parameters and initial conditions
+                                   # optional support for hybrid simulations
+                                   module1_v=None, module2_v=None  # optional stochastic components for the circuit
+                                   ):
+        # call initialisers
+        module1_par, module1_init_conds, module1_genes, module1_miscs, module1_name2pos, module1_styles = module1_initialiser()
+        module2_par, module2_init_conds, module2_genes, module2_miscs, module2_name2pos, module2_styles = module2_initialiser()
+        controller_par, controller_init_conds, controller_init_memory, controller_name2pos = controller_initialiser()
 
-        # update parameter, initial condition and colour dictionaries
-        cellmodel_par.update(circuit_par)
-        cellmodel_init_conds.update(circuit_init_conds)
+        # update parameter, initial condition
+        cellmodel_par.update(module1_par)
+        cellmodel_par.update(module2_par)
+        cellmodel_par.update(controller_par)
+        cellmodel_init_conds.update(module1_init_conds)
+        cellmodel_init_conds.update(module2_init_conds)
+        cellmodel_init_conds.update(controller_init_conds)
+        
+        # parameter merge special case: presence of CAT or protease genes in one module means it's present overall
+        cellmodel_par['cat_gene_present'] = module1_par['cat_gene_present'] or module2_par['cat_gene_present']
+        cellmodel_par['prot_gene_present'] = module1_par['prot_gene_present'] or module2_par['prot_gene_present']
+
+        # merge style dictionaries for the two modules
+        modules_styles = module1_styles.copy()
+        modules_styles.update(module2_styles)
+        
+        # merge name-to-position dictionaries for the two modules: requires shifting the position of the second module's species
+        modules_name2pos = module1_name2pos.copy()
+        x_entries_for_module_1 = len(module1_genes) * 2 + len(module1_miscs)  # number of entries for the first module in the state vector
+        for key in module2_name2pos.keys():
+            if((key[0:2]=='m_') or (key[0:2]== 'p')): # for mRNA and protein species, shift position by the number of species in x for the first module - IF the gene is present
+                if((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') or (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                    modules_name2pos[key] = module2_name2pos[key] + x_entries_for_module_1
+            elif(key[0:2] == 'k_'): # for synthetic mRNA-ribosome dissociation constants, shift position by the number of GENES in the first module
+                modules_name2pos[key] = module2_name2pos[key] + len(module1_genes)
+            elif(key[0:2] == 'F_'): # for transcription regulation functions, no shift necessary
+                modules_name2pos[key] = module2_name2pos[key]
+            else: # the rest is miscellaneous species, shift position by the number of species in x for the first module
+                modules_name2pos[key] = module2_name2pos[key] + x_entries_for_module_1
+
+        # merge gene and miscellaneous species lists
+        synth_genes = module1_genes + module2_genes
+        synth_miscs = module1_miscs + module2_miscs
 
         # join the circuit ODEs with the transcription regulation functions
-        circuit_ode_with_F_calc = lambda t, x, e, l, R, k_het, D, p_prot, par, name2pos: circuit_ode(circuit_F_calc,
-                                                                                             t, x, e, l, R, k_het, D, p_prot,
-                                                                                             par, name2pos)
+        module1_ode_with_F_calc = lambda t, x, u, e, l, R, k_het, D, p_prot, par, name2pos: module1_ode(module1_F_calc,
+                                                                                                        t, x, u,
+                                                                                                        e, l, R,
+                                                                                                        k_het, D, p_prot,
+                                                                                                        par,
+                                                                                                        name2pos)
+        module2_ode_with_F_calc = lambda t, x, u, e, l, R, k_het, D, p_prot, par, name2pos: module2_ode(module2_F_calc,
+                                                                                                        t, x, u,
+                                                                                                        e, l, R,
+                                                                                                        k_het, D, p_prot,
+                                                                                                        par,
+                                                                                                        name2pos)
 
         # IF stochastic component specified, predefine F_calc for it as well
-        if (circuit_v != None):
-            circuit_v_with_F_calc = lambda t, x, e, l, R, k_het, D, p_prot, mRNA_count_scales, par, name2pos: circuit_v(
-                circuit_F_calc,
+        if ((module1_v != None) and (module2_v != None)):
+            module1_v_with_F_calc = lambda t, x, u, e, l, R, k_het, D, p_prot, mRNA_count_scales, par, name2pos: module1_v(
+                module1_F_calc,
+                t, x, e, l, R, k_het, D, p_prot,
+                mRNA_count_scales,
+                par, name2pos)
+            module2_v_with_F_calc = lambda t, x, u, e, l, R, k_het, D, p_prot, mRNA_count_scales, par, name2pos: module2_v(
+                module2_F_calc,
                 t, x, e, l, R, k_het, D, p_prot,
                 mRNA_count_scales,
                 par, name2pos)
         else:
-            circuit_v_with_F_calc = None
+            module1_v_with_F_calc = None
+            module2_v_with_F_calc = None
 
-        # add the ciorcuit ODEs to that of the host cell model
-        cellmodel_ode = lambda t, x, args: ode(t, x, circuit_ode_with_F_calc, args)
+        # add the geetic module and controller ODEs (as well as control action calculator) to that of the host cell model
+        cellmodel_ode = lambda t, x, ctrl_memo, args: ode(t, x, ctrl_memo,
+                                                          module1_ode_with_F_calc, module2_ode_with_F_calc,
+                                                          controller_ode, controller_action,
+                                                          args)
 
         # return updated ode and parameter, initial conditions, circuit gene (and miscellaneous specie) names
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
-        return cellmodel_ode, circuit_F_calc, cellmodel_par, cellmodel_init_conds, circuit_genes, circuit_miscs, circuit_name2pos, circuit_styles, circuit_v_with_F_calc
+        return (cellmodel_ode,
+                module1_F_calc, module2_F_calc, controller_action, controller_update,
+                cellmodel_par, cellmodel_init_conds,
+                synth_genes, synth_miscs,
+                modules_name2pos, modules_styles, controller_name2pos,
+                module1_v_with_F_calc, module2_v_with_F_calc)
 
     # package synthetic gene parameters into jax arrays for calculating k values
     def synth_gene_params_for_jax(self, par,  # system parameters
-                                  circuit_genes  # circuit gene names
+                                  synth_genes  # circuit gene names
                                   ):
         # initialise parameter arrays
-        kplus_het = np.zeros(len(circuit_genes))
-        kminus_het = np.zeros(len(circuit_genes))
-        n_het = np.zeros(len(circuit_genes))
-        d_het = np.zeros(len(circuit_genes))
+        kplus_het = np.zeros(len(synth_genes))
+        kminus_het = np.zeros(len(synth_genes))
+        n_het = np.zeros(len(synth_genes))
+        d_het = np.zeros(len(synth_genes))
 
         # fill parameter arrays
-        for i in range(0, len(circuit_genes)):
-            kplus_het[i] = par['k+_' + circuit_genes[i]]
-            kminus_het[i] = par['k-_' + circuit_genes[i]]
-            n_het[i] = par['n_' + circuit_genes[i]]
-            d_het[i] = par['d_' + circuit_genes[i]]
+        for i in range(0, len(synth_genes)):
+            kplus_het[i] = par['k+_' + synth_genes[i]]
+            kminus_het[i] = par['k-_' + synth_genes[i]]
+            n_het[i] = par['n_' + synth_genes[i]]
+            d_het[i] = par['d_' + synth_genes[i]]
 
         # return as a tuple of arrays
         return (jnp.array(kplus_het), jnp.array(kminus_het), jnp.array(n_het), jnp.array(d_het))
@@ -200,7 +268,10 @@ class CellModelAuxiliary:
 
     # PREPARE FOR SIMULATIONS
     # set default initial condition vector
-    def x0_from_init_conds(self, init_conds, circuit_genes, circuit_miscs):
+    def x0_from_init_conds(self, init_conds,
+                           par,
+                           synth_genes, synth_miscs,
+                           modules_name2pos, controller_name2pos):
         # NATIVE GENES
         x0 = [
             # mRNAs;
@@ -219,319 +290,324 @@ class CellModelAuxiliary:
             init_conds['s'],  # nutrient quality
             init_conds['h'],  # chloramphenicol levels IN THE CELL
         ]
-        # SYNTHETIC CIRCUIT
-        for gene in circuit_genes:  # mRNAs
-            x0.append(init_conds['m_' + gene])
-        for gene in circuit_genes:  # proteins
-            x0.append(init_conds['p_' + gene])
+        # GENETIC MODULES
+        x0 += [0]*(2*len(synth_genes)+len(synth_miscs))  # initialise synthetic circuit species to zero
+        for gene in synth_genes:  # mRNAs and proteins
+            # set initial condition only if gene present
+            if (par['cat_gene_present'] or gene != 'cat') or (par['prot_gene_present'] or gene != 'prot'):
+                x0[modules_name2pos['m_' + gene]]=init_conds['m_' + gene]
+                x0[modules_name2pos['p_' + gene]]=init_conds['p_' + gene]
+        for misc in synth_miscs:    # miscellanous species
+            x0[modules_name2pos[misc]]=init_conds[misc]
 
-        # MISCELLANEOUS SPECIES
-        for misc in circuit_miscs:  # miscellanous species
-            x0.append(init_conds[misc])
+        # CONTROLLER
+        x0 += [0]*len(controller_name2pos)
+        for key in controller_name2pos.keys():
+            x0[controller_name2pos[key]] = init_conds[key]
 
         return jnp.array(x0)
 
     # PLOT RESULTS, CALCULATE CELLULAR VARIABLES
     # plot protein composition of the cell by mass over time
-    def plot_protein_masses(self, ts, xs,
-                            par, circuit_genes,  # model parameters, list of circuit genes
-                            dimensions=(320, 180), tspan=None):
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # create figure
-        mass_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Protein mass, aa",
-            x_range=tspan,
-            title='Protein masses',
-            tools="box_zoom,pan,hover,reset"
-        )
-
-        flip_t = np.flip(ts)  # flipped time axis for patch plotting
-
-        # plot heterologous protein mass - if there are any heterologous proteins to begin with
-        if (len(circuit_genes) != 0):
-            bottom_line = np.zeros(xs.shape[0])
-            top_line = bottom_line + np.sum(xs[:, 8 + len(circuit_genes):8 + len(circuit_genes) * 2] * np.array(
-                self.synth_gene_params_for_jax(par, circuit_genes)[2], ndmin=2), axis=1)
-            mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-                              line_width=0.5, line_color='black', fill_color=self.gene_colours['het'],
-                              legend_label='het')
-        else:
-            top_line = np.zeros(xs.shape[0])
-
-        # plot mass of inactivated ribosomes
-        if ((xs[:, 7] != 0).any()):
-            bottom_line = top_line
-            top_line = bottom_line + xs[:, 3] * par['n_r'] * (xs[:, 7] / (par['K_D'] + xs[:, 7]))
-            mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-                              line_width=0.5, line_color='black', fill_color=self.gene_colours['h'], legend_label='R:h')
-
-        # plot mass of active ribosomes - only if there are any to begin with
-        bottom_line = top_line
-        top_line = bottom_line + xs[:, 3] * par['n_r'] * (par['K_D'] / (par['K_D'] + xs[:, 7]))
-        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-                          line_width=0.5, line_color='black', fill_color=self.gene_colours['r'],
-                          legend_label='R (free)')
-
-        # plot metabolic protein mass
-        bottom_line = top_line
-        top_line = bottom_line + xs[:, 2] * par['n_a']
-        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-                          line_width=0.5, line_color='black', fill_color=self.gene_colours['a'], legend_label='p_a')
-
-        # plot housekeeping protein mass
-        bottom_line = top_line
-        top_line = bottom_line / (1 - par['phi_q'])
-        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-                          line_width=0.5, line_color='black', fill_color=self.gene_colours['q'], legend_label='p_q')
-
-        # add legend
-        mass_figure.legend.label_text_font_size = "8pt"
-        mass_figure.legend.location = "top_right"
-
-        return mass_figure
-
-    # plot mRNA, protein and tRNA concentrations over time
-    def plot_native_concentrations(self, ts, xs,
-                                   par, circuit_genes,  # model parameters, list of circuit genes
-                                   dimensions=(320, 180), tspan=None):
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # Create a ColumnDataSource object for the plot
-        source = bkmodels.ColumnDataSource(data={
-            't': ts,
-            'm_a': xs[:, 0],  # metabolic mRNA
-            'm_r': xs[:, 1],  # ribosomal mRNA
-            'p_a': xs[:, 2],  # metabolic protein
-            'R': xs[:, 3],  # ribosomal protein
-            'tc': xs[:, 4],  # charged tRNA
-            'tu': xs[:, 5],  # uncharged tRNA
-            's': xs[:, 6],  # nutrient quality
-            'h': xs[:, 7],  # chloramphenicol concentration
-            'm_het': np.sum(xs[:, 8:8 + len(circuit_genes)], axis=1),  # heterologous mRNA
-            'p_het': np.sum(xs[:, 8 + len(circuit_genes):8 + len(circuit_genes) * 2], axis=1),  # heterologous protein
-        })
-
-        # PLOT mRNA CONCENTRATIONS
-        mRNA_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="mRNA conc., nM",
-            x_range=tspan,
-            title='mRNA concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        mRNA_figure.line(x='t', y='m_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
-                         legend_label='m_a')  # plot metabolic mRNA concentrations
-        mRNA_figure.line(x='t', y='m_r', source=source, line_width=1.5, line_color=self.gene_colours['r'],
-                         legend_label='m_r')  # plot ribosomal mRNA concentrations
-        mRNA_figure.line(x='t', y='m_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
-                         legend_label='m_het')  # plot heterologous mRNA concentrations
-        mRNA_figure.legend.label_text_font_size = "8pt"
-        mRNA_figure.legend.location = "top_right"
-        mRNA_figure.legend.click_policy = 'hide'
-
-        # PLOT protein CONCENTRATIONS
-        protein_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Protein conc., nM",
-            x_range=tspan,
-            title='Protein concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        protein_figure.line(x='t', y='p_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
-                            legend_label='p_a')  # plot metabolic protein concentrations
-        protein_figure.line(x='t', y='R', source=source, line_width=1.5, line_color=self.gene_colours['r'],
-                            legend_label='R')  # plot ribosomal protein concentrations
-        protein_figure.line(x='t', y='p_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
-                            legend_label='p_het')  # plot heterologous protein concentrations
-        protein_figure.legend.label_text_font_size = "8pt"
-        protein_figure.legend.location = "top_right"
-        protein_figure.legend.click_policy = 'hide'
-
-        # PLOT tRNA CONCENTRATIONS
-        tRNA_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="tRNA conc., nM",
-            x_range=tspan,
-            title='tRNA concentrations',
-            tools="box_zoom,pan,hover,reset"
-        )
-        tRNA_figure.line(x='t', y='tc', source=source, line_width=1.5, line_color=self.tRNA_colours['tc'],
-                         legend_label='tc')  # plot charged tRNA concentrations
-        tRNA_figure.line(x='t', y='tu', source=source, line_width=1.5, line_color=self.tRNA_colours['tu'],
-                         legend_label='tu')  # plot uncharged tRNA concentrations
-        tRNA_figure.legend.label_text_font_size = "8pt"
-        tRNA_figure.legend.location = "top_right"
-        tRNA_figure.legend.click_policy = 'hide'        
-
-        # PLOT INTRACELLULAR CHLORAMPHENICOL CONCENTRATION
-        h_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="h, nM",
-            x_range=tspan,
-            title='Intracellular chloramphenicol concentration',
-            tools="box_zoom,pan,hover,reset"
-        )
-        h_figure.line(x='t', y='h', source=source, line_width=1.5, line_color=self.gene_colours['h'],
-                      legend_label='h')  # plot intracellular chloramphenicol concentration
-
-        return mRNA_figure, protein_figure, tRNA_figure, h_figure
-
-    # plot concentrations for the synthetic circuits
-    def plot_circuit_concentrations(self, ts, xs,
-                                    par, circuit_genes, circuit_miscs, circuit_name2pos,
-                                    # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-                                    circuit_styles,  # colours for the circuit plots
-                                    dimensions=(320, 180), tspan=None):
-        # if no circuitry at all, return no plots
-        if (len(circuit_genes) + len(circuit_miscs) == 0):
-            return None, None, None
-
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # Create a ColumnDataSource object for the plot
-        data_for_column = {'t': ts}  # initialise with time axis
-        # record synthetic mRNA and protein concentrations
-        for i in range(0, len(circuit_genes)):
-            data_for_column['m_' + circuit_genes[i]] = xs[:, 8 + i]
-            data_for_column['p_' + circuit_genes[i]] = xs[:, 8 + len(circuit_genes) + i]
-        # record miscellaneous species' concentrations
-        for i in range(0, len(circuit_miscs)):
-            data_for_column[circuit_miscs[i]] = xs[:, 8 + len(circuit_genes) * 2 + i]
-        source = bkmodels.ColumnDataSource(data=data_for_column)
-
-        # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
-        if (len(circuit_genes) > 0):
-            # mRNAs
-            mRNA_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="mRNA conc., nM",
-                x_range=tspan,
-                title='mRNA concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            for gene in circuit_genes:
-                mRNA_figure.line(x='t', y='m_' + gene, source=source, line_width=1.5,
-                                 line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                                 legend_label='m_' + gene)
-            mRNA_figure.legend.label_text_font_size = "8pt"
-            mRNA_figure.legend.location = "top_right"
-            mRNA_figure.legend.click_policy = 'hide'
-
-            # proteins
-            protein_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="Protein conc., nM",
-                x_range=tspan,
-                title='Protein concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            for gene in circuit_genes:
-                protein_figure.line(x='t', y='p_' + gene, source=source, line_width=1.5,
-                                    line_color=circuit_styles['colours'][gene],
-                                    line_dash=circuit_styles['dashes'][gene],
-                                    legend_label='p_' + gene)
-            protein_figure.legend.label_text_font_size = "8pt"
-            protein_figure.legend.location = "top_right"
-            protein_figure.legend.click_policy = 'hide'
-        else:
-            mRNA_figure = None
-            protein_figure = None
-
-        # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
-        if (len(circuit_miscs) > 0):
-            misc_figure = bkplot.figure(
-                frame_width=dimensions[0],
-                frame_height=dimensions[1],
-                x_axis_label="t, hours",
-                y_axis_label="Conc., nM",
-                x_range=tspan,
-                title='Miscellaneous species concentrations',
-                tools="box_zoom,pan,hover,reset"
-            )
-            for misc in circuit_miscs:
-                misc_figure.line(x='t', y=misc, source=source, line_width=1.5,
-                                 line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
-                                 legend_label=misc)
-            misc_figure.legend.label_text_font_size = "8pt"
-            misc_figure.legend.location = "top_right"
-            misc_figure.legend.click_policy = 'hide'
-        else:
-            misc_figure = None
-
-        return mRNA_figure, protein_figure, misc_figure
-
-    # plot transcription regulation function values for the circuit's genes
-    def plot_circuit_regulation(self, ts, xs,
-                                circuit_F_calc,
-                                # function calculating the transcription regulation functions for the circuit
-                                par, circuit_genes, circuit_miscs, circuit_name2pos,
-                                # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
-                                circuit_styles,  # colours for the circuit plots
-                                dimensions=(320, 180), tspan=None):
-        # if no circuitry, return no plots
-        if (len(circuit_genes) == 0):
-            return None
-
-        # set default time span if unspecified
-        if (tspan == None):
-            tspan = (ts[0], ts[-1])
-
-        # find values of gene transcription regulation functions
-        Fs = np.zeros((len(ts), len(circuit_genes)))  # initialise
-        for i in range(0, len(ts)):
-            Fs[i, :] = np.array(circuit_F_calc(ts[i], xs[i, :], par, circuit_name2pos)[:])
-
-        # Create ColumnDataSource object for the plot
-        data_for_column = {'t': ts}  # initialise with time axis
-        for i in range(0, len(circuit_genes)):
-            data_for_column['F_' + str(circuit_genes[i])] = Fs[:, i]
-
-        # PLOT
-        F_figure = bkplot.figure(
-            frame_width=dimensions[0],
-            frame_height=dimensions[1],
-            x_axis_label="t, hours",
-            y_axis_label="Transc. reg. funcs. F",
-            x_range=tspan,
-            y_range=(0, 1.05),
-            title='Gene transcription regulation',
-            tools="box_zoom,pan,hover,reset"
-        )
-        for gene in circuit_genes:
-            F_figure.line(x='t', y='F_' + gene, source=data_for_column, line_width=1.5,
-                          line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
-                          legend_label='F_' + gene)
-        F_figure.legend.label_text_font_size = "8pt"
-        F_figure.legend.location = "top_right"
-        F_figure.legend.click_policy = 'hide'
-
-        return F_figure
+    # def plot_protein_masses(self, ts, xs,
+    #                         par, synth_genes,  # model parameters, list of circuit genes
+    #                         dimensions=(320, 180), tspan=None):
+    #     # set default time span if unspecified
+    #     if (tspan == None):
+    #         tspan = (ts[0], ts[-1])
+    # 
+    #     # create figure
+    #     mass_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="Protein mass, aa",
+    #         x_range=tspan,
+    #         title='Protein masses',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    # 
+    #     flip_t = np.flip(ts)  # flipped time axis for patch plotting
+    # 
+    #     # plot heterologous protein mass - if there are any heterologous proteins to begin with
+    #     if (len(synth_genes) != 0):
+    #         bottom_line = np.zeros(xs.shape[0])
+    #         top_line = bottom_line + np.sum(xs[:, 8 + len(synth_genes):8 + len(synth_genes) * 2] * np.array(
+    #             self.synth_gene_params_for_jax(par, synth_genes)[2], ndmin=2), axis=1)
+    #         mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+    #                           line_width=0.5, line_color='black', fill_color=self.gene_colours['het'],
+    #                           legend_label='het')
+    #     else:
+    #         top_line = np.zeros(xs.shape[0])
+    # 
+    #     # plot mass of inactivated ribosomes
+    #     if ((xs[:, 7] != 0).any()):
+    #         bottom_line = top_line
+    #         top_line = bottom_line + xs[:, 3] * par['n_r'] * (xs[:, 7] / (par['K_D'] + xs[:, 7]))
+    #         mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+    #                           line_width=0.5, line_color='black', fill_color=self.gene_colours['h'], legend_label='R:h')
+    # 
+    #     # plot mass of active ribosomes - only if there are any to begin with
+    #     bottom_line = top_line
+    #     top_line = bottom_line + xs[:, 3] * par['n_r'] * (par['K_D'] / (par['K_D'] + xs[:, 7]))
+    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['r'],
+    #                       legend_label='R (free)')
+    # 
+    #     # plot metabolic protein mass
+    #     bottom_line = top_line
+    #     top_line = bottom_line + xs[:, 2] * par['n_a']
+    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['a'], legend_label='p_a')
+    # 
+    #     # plot housekeeping protein mass
+    #     bottom_line = top_line
+    #     top_line = bottom_line / (1 - par['phi_q'])
+    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['q'], legend_label='p_q')
+    # 
+    #     # add legend
+    #     mass_figure.legend.label_text_font_size = "8pt"
+    #     mass_figure.legend.location = "top_right"
+    # 
+    #     return mass_figure
+    # 
+    # # plot mRNA, protein and tRNA concentrations over time
+    # def plot_native_concentrations(self, ts, xs,
+    #                                par, synth_genes,  # model parameters, list of circuit genes
+    #                                dimensions=(320, 180), tspan=None):
+    #     # set default time span if unspecified
+    #     if (tspan == None):
+    #         tspan = (ts[0], ts[-1])
+    # 
+    #     # Create a ColumnDataSource object for the plot
+    #     source = bkmodels.ColumnDataSource(data={
+    #         't': ts,
+    #         'm_a': xs[:, 0],  # metabolic mRNA
+    #         'm_r': xs[:, 1],  # ribosomal mRNA
+    #         'p_a': xs[:, 2],  # metabolic protein
+    #         'R': xs[:, 3],  # ribosomal protein
+    #         'tc': xs[:, 4],  # charged tRNA
+    #         'tu': xs[:, 5],  # uncharged tRNA
+    #         's': xs[:, 6],  # nutrient quality
+    #         'h': xs[:, 7],  # chloramphenicol concentration
+    #         'm_het': np.sum(xs[:, 8:8 + len(synth_genes)], axis=1),  # heterologous mRNA
+    #         'p_het': np.sum(xs[:, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=1),  # heterologous protein
+    #     })
+    # 
+    #     # PLOT mRNA CONCENTRATIONS
+    #     mRNA_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="mRNA conc., nM",
+    #         x_range=tspan,
+    #         title='mRNA concentrations',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    #     mRNA_figure.line(x='t', y='m_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
+    #                      legend_label='m_a')  # plot metabolic mRNA concentrations
+    #     mRNA_figure.line(x='t', y='m_r', source=source, line_width=1.5, line_color=self.gene_colours['r'],
+    #                      legend_label='m_r')  # plot ribosomal mRNA concentrations
+    #     mRNA_figure.line(x='t', y='m_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
+    #                      legend_label='m_het')  # plot heterologous mRNA concentrations
+    #     mRNA_figure.legend.label_text_font_size = "8pt"
+    #     mRNA_figure.legend.location = "top_right"
+    #     mRNA_figure.legend.click_policy = 'hide'
+    # 
+    #     # PLOT protein CONCENTRATIONS
+    #     protein_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="Protein conc., nM",
+    #         x_range=tspan,
+    #         title='Protein concentrations',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    #     protein_figure.line(x='t', y='p_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
+    #                         legend_label='p_a')  # plot metabolic protein concentrations
+    #     protein_figure.line(x='t', y='R', source=source, line_width=1.5, line_color=self.gene_colours['r'],
+    #                         legend_label='R')  # plot ribosomal protein concentrations
+    #     protein_figure.line(x='t', y='p_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
+    #                         legend_label='p_het')  # plot heterologous protein concentrations
+    #     protein_figure.legend.label_text_font_size = "8pt"
+    #     protein_figure.legend.location = "top_right"
+    #     protein_figure.legend.click_policy = 'hide'
+    # 
+    #     # PLOT tRNA CONCENTRATIONS
+    #     tRNA_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="tRNA conc., nM",
+    #         x_range=tspan,
+    #         title='tRNA concentrations',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    #     tRNA_figure.line(x='t', y='tc', source=source, line_width=1.5, line_color=self.tRNA_colours['tc'],
+    #                      legend_label='tc')  # plot charged tRNA concentrations
+    #     tRNA_figure.line(x='t', y='tu', source=source, line_width=1.5, line_color=self.tRNA_colours['tu'],
+    #                      legend_label='tu')  # plot uncharged tRNA concentrations
+    #     tRNA_figure.legend.label_text_font_size = "8pt"
+    #     tRNA_figure.legend.location = "top_right"
+    #     tRNA_figure.legend.click_policy = 'hide'        
+    # 
+    #     # PLOT INTRACELLULAR CHLORAMPHENICOL CONCENTRATION
+    #     h_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="h, nM",
+    #         x_range=tspan,
+    #         title='Intracellular chloramphenicol concentration',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    #     h_figure.line(x='t', y='h', source=source, line_width=1.5, line_color=self.gene_colours['h'],
+    #                   legend_label='h')  # plot intracellular chloramphenicol concentration
+    # 
+    #     return mRNA_figure, protein_figure, tRNA_figure, h_figure
+    # 
+    # # plot concentrations for the synthetic circuits
+    # def plot_circuit_concentrations(self, ts, xs,
+    #                                 par, synth_genes, synth_miscs, modules_name2pos,
+    #                                 # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
+    #                                 circuit_styles,  # colours for the circuit plots
+    #                                 dimensions=(320, 180), tspan=None):
+    #     # if no circuitry at all, return no plots
+    #     if (len(synth_genes) + len(synth_miscs) == 0):
+    #         return None, None, None
+    # 
+    #     # set default time span if unspecified
+    #     if (tspan == None):
+    #         tspan = (ts[0], ts[-1])
+    # 
+    #     # Create a ColumnDataSource object for the plot
+    #     data_for_column = {'t': ts}  # initialise with time axis
+    #     # record synthetic mRNA and protein concentrations
+    #     for i in range(0, len(synth_genes)):
+    #         data_for_column['m_' + synth_genes[i]] = xs[:, 8 + i]
+    #         data_for_column['p_' + synth_genes[i]] = xs[:, 8 + len(synth_genes) + i]
+    #     # record miscellaneous species' concentrations
+    #     for i in range(0, len(synth_miscs)):
+    #         data_for_column[synth_miscs[i]] = xs[:, 8 + len(synth_genes) * 2 + i]
+    #     source = bkmodels.ColumnDataSource(data=data_for_column)
+    # 
+    #     # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
+    #     if (len(synth_genes) > 0):
+    #         # mRNAs
+    #         mRNA_figure = bkplot.figure(
+    #             frame_width=dimensions[0],
+    #             frame_height=dimensions[1],
+    #             x_axis_label="t, hours",
+    #             y_axis_label="mRNA conc., nM",
+    #             x_range=tspan,
+    #             title='mRNA concentrations',
+    #             tools="box_zoom,pan,hover,reset"
+    #         )
+    #         for gene in synth_genes:
+    #             mRNA_figure.line(x='t', y='m_' + gene, source=source, line_width=1.5,
+    #                              line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
+    #                              legend_label='m_' + gene)
+    #         mRNA_figure.legend.label_text_font_size = "8pt"
+    #         mRNA_figure.legend.location = "top_right"
+    #         mRNA_figure.legend.click_policy = 'hide'
+    # 
+    #         # proteins
+    #         protein_figure = bkplot.figure(
+    #             frame_width=dimensions[0],
+    #             frame_height=dimensions[1],
+    #             x_axis_label="t, hours",
+    #             y_axis_label="Protein conc., nM",
+    #             x_range=tspan,
+    #             title='Protein concentrations',
+    #             tools="box_zoom,pan,hover,reset"
+    #         )
+    #         for gene in synth_genes:
+    #             protein_figure.line(x='t', y='p_' + gene, source=source, line_width=1.5,
+    #                                 line_color=circuit_styles['colours'][gene],
+    #                                 line_dash=circuit_styles['dashes'][gene],
+    #                                 legend_label='p_' + gene)
+    #         protein_figure.legend.label_text_font_size = "8pt"
+    #         protein_figure.legend.location = "top_right"
+    #         protein_figure.legend.click_policy = 'hide'
+    #     else:
+    #         mRNA_figure = None
+    #         protein_figure = None
+    # 
+    #     # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
+    #     if (len(synth_miscs) > 0):
+    #         misc_figure = bkplot.figure(
+    #             frame_width=dimensions[0],
+    #             frame_height=dimensions[1],
+    #             x_axis_label="t, hours",
+    #             y_axis_label="Conc., nM",
+    #             x_range=tspan,
+    #             title='Miscellaneous species concentrations',
+    #             tools="box_zoom,pan,hover,reset"
+    #         )
+    #         for misc in synth_miscs:
+    #             misc_figure.line(x='t', y=misc, source=source, line_width=1.5,
+    #                              line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
+    #                              legend_label=misc)
+    #         misc_figure.legend.label_text_font_size = "8pt"
+    #         misc_figure.legend.location = "top_right"
+    #         misc_figure.legend.click_policy = 'hide'
+    #     else:
+    #         misc_figure = None
+    # 
+    #     return mRNA_figure, protein_figure, misc_figure
+    # 
+    # # plot transcription regulation function values for the circuit's genes
+    # def plot_circuit_regulation(self, ts, xs,
+    #                             circuit_F_calc,
+    #                             # function calculating the transcription regulation functions for the circuit
+    #                             par, synth_genes, synth_miscs, modules_name2pos,
+    #                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
+    #                             circuit_styles,  # colours for the circuit plots
+    #                             dimensions=(320, 180), tspan=None):
+    #     # if no circuitry, return no plots
+    #     if (len(synth_genes) == 0):
+    #         return None
+    # 
+    #     # set default time span if unspecified
+    #     if (tspan == None):
+    #         tspan = (ts[0], ts[-1])
+    # 
+    #     # find values of gene transcription regulation functions
+    #     Fs = np.zeros((len(ts), len(synth_genes)))  # initialise
+    #     for i in range(0, len(ts)):
+    #         Fs[i, :] = np.array(circuit_F_calc(ts[i], xs[i, :], par, modules_name2pos)[:])
+    # 
+    #     # Create ColumnDataSource object for the plot
+    #     data_for_column = {'t': ts}  # initialise with time axis
+    #     for i in range(0, len(synth_genes)):
+    #         data_for_column['F_' + str(synth_genes[i])] = Fs[:, i]
+    # 
+    #     # PLOT
+    #     F_figure = bkplot.figure(
+    #         frame_width=dimensions[0],
+    #         frame_height=dimensions[1],
+    #         x_axis_label="t, hours",
+    #         y_axis_label="Transc. reg. funcs. F",
+    #         x_range=tspan,
+    #         y_range=(0, 1.05),
+    #         title='Gene transcription regulation',
+    #         tools="box_zoom,pan,hover,reset"
+    #     )
+    #     for gene in synth_genes:
+    #         F_figure.line(x='t', y='F_' + gene, source=data_for_column, line_width=1.5,
+    #                       line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
+    #                       legend_label='F_' + gene)
+    #     F_figure.legend.label_text_font_size = "8pt"
+    #     F_figure.legend.location = "top_right"
+    #     F_figure.legend.click_policy = 'hide'
+    # 
+    #     return F_figure
 
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
     def plot_phys_variables(self, ts, xs,
-                            par, circuit_genes, circuit_miscs, circuit_name2pos,
+                            par, synth_genes, synth_miscs, modules_name2pos,
                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
                             dimensions=(320, 180), tspan=None):
         # set default time span if unspecified
@@ -539,8 +615,8 @@ class CellModelAuxiliary:
             tspan = (ts[0], ts[-1])
 
         # get cell variables' values over time
-        e, l, F_r, nu, _, T, D, D_nodeg = self.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts, xs, par, circuit_genes, circuit_miscs,
-                                                                            circuit_name2pos)
+        e, l, F_r, nu, _, T, D, D_nodeg = self.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts, xs, par, synth_genes, synth_miscs,
+                                                                            modules_name2pos)
 
         # Create a ColumnDataSource object for the plot
         data_for_column = {'t': np.array(ts), 'e': np.array(e), 'l': np.array(l), 'F_r': np.array(F_r),
@@ -645,7 +721,7 @@ class CellModelAuxiliary:
 
     # find values of different cellular variables
     def get_e_l_Fr_nu_psi_T_D_Dnodeg(self, t, x,
-                                     par, circuit_genes, circuit_miscs, circuit_name2pos):
+                                     par, synth_genes, synth_miscs, modules_name2pos):
         # give the state vector entries meaningful names
         m_a = x[:, 0]  # metabolic gene mRNA
         m_r = x[:, 1]  # ribosomal gene mRNA
@@ -655,18 +731,18 @@ class CellModelAuxiliary:
         tu = x[:, 5]  # uncharged tRNAs
         s = x[:, 6]  # nutrient quality (constant)
         h = x[:, 7]  # chloramphenicol concentration (constant)
-        x_het = x[:, 8:8 + 2 * len(circuit_genes)]  # heterologous protein concentrations
-        misc = x[:, 8 + 2 * len(circuit_genes):8 + 2 * len(circuit_genes) + len(circuit_miscs)]  # miscellaneous species
+        x_het = x[:, 8:8 + 2 * len(synth_genes)]  # heterologous protein concentrations
+        misc = x[:, 8 + 2 * len(synth_genes):8 + 2 * len(synth_genes) + len(synth_miscs)]  # miscellaneous species
 
         # vector of Synthetic Gene Parameters 4 JAX
-        sgp4j = self.synth_gene_params_for_jax(par, circuit_genes)
+        sgp4j = self.synth_gene_params_for_jax(par, synth_genes)
         kplus_het, kminus_het, n_het, d_het = sgp4j
 
         # FIND SPECIAL SYNTHETIC PROTEIN CONCENTRATIONS - IF PRESENT
         # chloramphenicol acetyltransferase (antibiotic reistance)
-        p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[:,circuit_name2pos['p_cat']], jnp.zeros_like(x[:,0]))
+        p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[:,modules_name2pos['p_cat']], jnp.zeros_like(x[:,0]))
         # synthetic protease (synthetic protein degradation)
-        p_prot = jax.lax.select(par['prot_gene_present'] == 1, x[:,circuit_name2pos['p_prot']], jnp.zeros_like(x[:,0]))
+        p_prot = jax.lax.select(par['prot_gene_present'] == 1, x[:,modules_name2pos['p_prot']], jnp.zeros_like(x[:,0]))
 
         # CALCULATE PHYSIOLOGICAL VARIABLES
         # translation elongation rate
@@ -675,7 +751,7 @@ class CellModelAuxiliary:
         # ribosome dissociation constants
         k_a = k_calc(e, par['k+_a'], par['k-_a'], par['n_a'])
         k_r = k_calc(e, par['k+_r'], par['k-_r'], par['n_r'])
-        k_het = k_calc((jnp.atleast_2d(jnp.array(e) * jnp.ones((len(circuit_genes), 1)))).T,
+        k_het = k_calc((jnp.atleast_2d(jnp.array(e) * jnp.ones((len(synth_genes), 1)))).T,
                        jnp.atleast_2d(kplus_het) * jnp.ones((len(e), 1)),
                        jnp.atleast_2d(kminus_het) * jnp.ones((len(e), 1)),
                        jnp.atleast_2d(n_het) * jnp.ones((len(e), 1)))  # heterologous genes
@@ -687,12 +763,12 @@ class CellModelAuxiliary:
         H = (par['K_D'] + h) / par['K_D']
 
         # heterologous mRNA levels scaled by RBS strength
-        m_het_div_k_het = jnp.sum(x[:, 8:8 + len(circuit_genes)] / k_het, axis=1)  # heterologous protein synthesis flux
+        m_het_div_k_het = jnp.sum(x[:, 8:8 + len(synth_genes)] / k_het, axis=1)  # heterologous protein synthesis flux
 
         # heterologous protein degradation flux
         prodeflux = jnp.multiply(
             p_prot,
-            jnp.sum(d_het * n_het * x[:, 8 + len(circuit_genes):8 + len(circuit_genes) * 2],axis=1)
+            jnp.sum(d_het * n_het * x[:, 8 + len(synth_genes):8 + len(synth_genes) * 2],axis=1)
         )
         # heterologous protein degradation flux
         prodeflux_times_H_div_eR = prodeflux * H / (e * R)
@@ -720,7 +796,7 @@ class CellModelAuxiliary:
     # PLOT RESULTS FOR SEVERAL TRAJECTORIES AT ONCE (SAME TIME AXIS)
     # plot mRNA, protein and tRNA concentrations over time
     def plot_native_concentrations_multiple(self, ts, xss,
-                                            par, circuit_genes,  # model parameters, list of circuit genes
+                                            par, synth_genes,  # model parameters, list of circuit genes
                                             dimensions=(320, 180), tspan=None,
                                             simtraj_alpha=0.1):
         # set default time span if unspecified
@@ -741,8 +817,8 @@ class CellModelAuxiliary:
                 'tu': xss[i, :, 5],  # uncharged tRNA
                 's': xss[i, :, 6],  # nutrient quality
                 'h': xss[i, :, 7],  # chloramphenicol concentration
-                'm_het': np.sum(xss[i, :, 8:8 + len(circuit_genes)], axis=1),  # heterologous mRNA
-                'p_het': np.sum(xss[i, :, 8 + len(circuit_genes):8 + len(circuit_genes) * 2], axis=1),  # heterologous protein
+                'm_het': np.sum(xss[i, :, 8:8 + len(synth_genes)], axis=1),  # heterologous mRNA
+                'p_het': np.sum(xss[i, :, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=1),  # heterologous protein
             })
             
         # Create a ColumnDataSource object for plotting the average trajectory
@@ -756,8 +832,8 @@ class CellModelAuxiliary:
             'tu': np.mean(xss[:, :, 5], axis=0),  # uncharged tRNA
             's': np.mean(xss[:, :, 6], axis=0),  # nutrient quality
             'h': np.mean(xss[:, :, 7], axis=0),  # chloramphenicol concentration
-            'm_het': np.sum(np.mean(xss[:, :, 8:8 + len(circuit_genes)], axis=0), axis=1),  # heterologous mRNA
-            'p_het': np.sum(np.mean(xss[:, :, 8 + len(circuit_genes):8 + len(circuit_genes) * 2], axis=0), axis=1),  # heterologous protein
+            'm_het': np.sum(np.mean(xss[:, :, 8:8 + len(synth_genes)], axis=0), axis=1),  # heterologous mRNA
+            'p_het': np.sum(np.mean(xss[:, :, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=0), axis=1),  # heterologous protein
         })
 
         # PLOT mRNA CONCENTRATIONS
@@ -873,13 +949,13 @@ class CellModelAuxiliary:
 
     # plot concentrations for the synthetic circuits
     def plot_circuit_concentrations_multiple(self, ts, xss,
-                                             par, circuit_genes, circuit_miscs, circuit_name2pos,
+                                             par, synth_genes, synth_miscs, modules_name2pos,
                                              # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
                                              circuit_styles,  # colours for the circuit plots
                                              dimensions=(320, 180), tspan=None,
                                              simtraj_alpha=0.1):
         # if no circuitry at all, return no plots
-        if (len(circuit_genes) + len(circuit_miscs) == 0):
+        if (len(synth_genes) + len(synth_miscs) == 0):
             return None, None, None
 
         # set default time span if unspecified
@@ -892,27 +968,27 @@ class CellModelAuxiliary:
             # Create a ColumnDataSource object for the plot
             data_for_column = {'t': ts}
             # record synthetic mRNA and protein concentrations
-            for j in range(0, len(circuit_genes)):
-                data_for_column['m_' + circuit_genes[j]] = xss[i, :, 8 + j]
-                data_for_column['p_' + circuit_genes[j]] = xss[i, :, 8 + len(circuit_genes) + j]
+            for j in range(0, len(synth_genes)):
+                data_for_column['m_' + synth_genes[j]] = xss[i, :, 8 + j]
+                data_for_column['p_' + synth_genes[j]] = xss[i, :, 8 + len(synth_genes) + j]
             # record miscellaneous species' concentrations
-            for j in range(0, len(circuit_miscs)):
-                data_for_column[circuit_miscs[j]] = xss[i, :, 8 + len(circuit_genes) * 2 + j]
+            for j in range(0, len(synth_miscs)):
+                data_for_column[synth_miscs[j]] = xss[i, :, 8 + len(synth_genes) * 2 + j]
             sources[i] = bkmodels.ColumnDataSource(data=data_for_column)
 
         # Create a ColumnDataSource object for plotting the average trajectory
         data_for_column = {'t': ts}
         # record synthetic mRNA and protein concentrations
-        for j in range(0, len(circuit_genes)):
-            data_for_column['m_' + circuit_genes[j]] = np.mean(xss[:, :, 8 + j], axis=0)
-            data_for_column['p_' + circuit_genes[j]] = np.mean(xss[:, :, 8 + len(circuit_genes) + j], axis=0)
+        for j in range(0, len(synth_genes)):
+            data_for_column['m_' + synth_genes[j]] = np.mean(xss[:, :, 8 + j], axis=0)
+            data_for_column['p_' + synth_genes[j]] = np.mean(xss[:, :, 8 + len(synth_genes) + j], axis=0)
         # record miscellaneous species' concentrations
-        for j in range(0, len(circuit_miscs)):
-            data_for_column[circuit_miscs[j]] = np.mean(xss[:, :, 8 + len(circuit_genes) * 2 + j], axis=0)
+        for j in range(0, len(synth_miscs)):
+            data_for_column[synth_miscs[j]] = np.mean(xss[:, :, 8 + len(synth_genes) * 2 + j], axis=0)
         source_avg = bkmodels.ColumnDataSource(data=data_for_column)
 
         # PLOT mRNA and PROTEIN CONCENTRATIONS (IF ANY)
-        if (len(circuit_genes) > 0):
+        if (len(synth_genes) > 0):
             # mRNAs
             mRNA_figure = bkplot.figure(
                 frame_width=dimensions[0],
@@ -925,12 +1001,12 @@ class CellModelAuxiliary:
             )
             # plot simulated trajectories
             for i in range(0, len(xss)):
-                for gene in circuit_genes:
+                for gene in synth_genes:
                     mRNA_figure.line(x='t', y='m_' + gene, source=sources[i], line_width=1.5,
                                      line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
                                      legend_label='m_' + gene, line_alpha=simtraj_alpha)
             # plot average trajectory
-            for gene in circuit_genes:
+            for gene in synth_genes:
                 mRNA_figure.line(x='t', y='m_' + gene, source=source_avg, line_width=1.5,
                                  line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
                                  legend_label='m_' + gene)
@@ -951,13 +1027,13 @@ class CellModelAuxiliary:
             )
             # plot simulated trajectories
             for i in range(0, len(xss)):
-                for gene in circuit_genes:
+                for gene in synth_genes:
                     protein_figure.line(x='t', y='p_' + gene, source=sources[i], line_width=1.5,
                                         line_color=circuit_styles['colours'][gene],
                                         line_dash=circuit_styles['dashes'][gene],
                                         legend_label='p_' + gene, line_alpha=simtraj_alpha)
             # plot average trajectory
-            for gene in circuit_genes:
+            for gene in synth_genes:
                 protein_figure.line(x='t', y='p_' + gene, source=source_avg, line_width=1.5,
                                     line_color=circuit_styles['colours'][gene],
                                     line_dash=circuit_styles['dashes'][gene],
@@ -971,7 +1047,7 @@ class CellModelAuxiliary:
             protein_figure = None
 
         # PLOT MISCELLANEOUS SPECIES' CONCENTRATIONS (IF ANY)
-        if (len(circuit_miscs) > 0):
+        if (len(synth_miscs) > 0):
             misc_figure = bkplot.figure(
                 frame_width=dimensions[0],
                 frame_height=dimensions[1],
@@ -983,12 +1059,12 @@ class CellModelAuxiliary:
             )
             # plot simulated trajectories
             for i in range(0, len(xss)):
-                for misc in circuit_miscs:
+                for misc in synth_miscs:
                     misc_figure.line(x='t', y=misc, source=sources[i], line_width=1.5,
                                      line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
                                      legend_label=misc, line_alpha=simtraj_alpha)
             # plot average trajectory
-            for misc in circuit_miscs:
+            for misc in synth_miscs:
                 misc_figure.line(x='t', y=misc, source=source_avg, line_width=1.5,
                                  line_color=circuit_styles['colours'][misc], line_dash=circuit_styles['dashes'][misc],
                                  legend_label=misc)
@@ -1006,13 +1082,13 @@ class CellModelAuxiliary:
     def plot_circuit_regulation_multiple(self, ts, xss,
                                          par, circuit_F_calc,
                                             # function calculating the transcription regulation functions for the circuit
-                                            circuit_genes, circuit_miscs, circuit_name2pos,
+                                            synth_genes, synth_miscs, modules_name2pos,
                                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
                                             circuit_styles,  # colours for the circuit plots
                                             dimensions=(320, 180), tspan=None,
                                             simtraj_alpha=0.1):
         # if no circuitry at all, return no plots
-        if (len(circuit_genes) + len(circuit_miscs) == 0):
+        if (len(synth_genes) + len(synth_miscs) == 0):
             return None
 
         # set default time span if unspecified
@@ -1022,27 +1098,27 @@ class CellModelAuxiliary:
         # find values of gene transcription regulation functions and create ColumnDataSource objects for the plot
         sources = {}
         for i in range(0, len(xss)):
-            Fs = np.zeros((len(ts), len(circuit_genes)))  # initialise
+            Fs = np.zeros((len(ts), len(synth_genes)))  # initialise
             for k in range(0, len(ts)):
-                Fs[k, :] = np.array(circuit_F_calc(ts[k], xss[i, k, :], par, circuit_name2pos)[:])
+                Fs[k, :] = np.array(circuit_F_calc(ts[k], xss[i, k, :], par, modules_name2pos)[:])
 
             # Create a ColumnDataSource object for the plot
             data_for_column = {'t': ts}
-            for j in range(0, len(circuit_genes)):
-                data_for_column['F_' + circuit_genes[j]] = Fs[:, j]
+            for j in range(0, len(synth_genes)):
+                data_for_column['F_' + synth_genes[j]] = Fs[:, j]
             sources[i] = bkmodels.ColumnDataSource(data=data_for_column)
 
         # Create a ColumnDataSource object for plotting the average trajectory
         data_for_column = {'t': ts}
-        for j in range(0, len(circuit_genes)):
-            data_for_column['F_' + circuit_genes[j]] = np.zeros_like(ts)
+        for j in range(0, len(synth_genes)):
+            data_for_column['F_' + synth_genes[j]] = np.zeros_like(ts)
         # add gene transcription regulation functions for different trajectories together
         for i in range(0, len(xss)):
-            for j in range(0, len(circuit_genes)):
-                data_for_column['F_' + circuit_genes[j]] += np.array(sources[i].data['F_' + circuit_genes[j]])
+            for j in range(0, len(synth_genes)):
+                data_for_column['F_' + synth_genes[j]] += np.array(sources[i].data['F_' + synth_genes[j]])
         # divide by the number of trajectories to get the average
-        for j in range(0, len(circuit_genes)):
-            data_for_column['F_' + circuit_genes[j]] /= len(xss)
+        for j in range(0, len(synth_genes)):
+            data_for_column['F_' + synth_genes[j]] /= len(xss)
         source_avg = bkmodels.ColumnDataSource(data=data_for_column)
 
         # PLOT TRANSCRIPTION REGULATION FUNCTIONS
@@ -1058,12 +1134,12 @@ class CellModelAuxiliary:
         )
         # plot simulated trajectories
         for i in range(0, len(xss)):
-            for gene in circuit_genes:
+            for gene in synth_genes:
                 F_figure.line(x='t', y='F_' + gene, source=sources[i], line_width=1.5,
                               line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
                               legend_label='F_' + gene, line_alpha=simtraj_alpha)
         # plot average trajectory
-        for gene in circuit_genes:
+        for gene in synth_genes:
             F_figure.line(x='t', y='F_' + gene, source=source_avg, line_width=1.5,
                           line_color=circuit_styles['colours'][gene], line_dash=circuit_styles['dashes'][gene],
                           legend_label='F_' + gene)
@@ -1076,12 +1152,12 @@ class CellModelAuxiliary:
 
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
     def plot_phys_variables_multiple(self, ts, xss,
-                            par, circuit_genes, circuit_miscs, circuit_name2pos,
+                            par, synth_genes, synth_miscs, modules_name2pos,
                             # model parameters, list of circuit genes and miscellaneous species, and dictionary mapping gene names to their positions in the state vector
                             dimensions=(320, 180), tspan=None,
                             simtraj_alpha=0.1):
         # if no circuitry at all, return no plots
-        if (len(circuit_genes) + len(circuit_miscs) == 0):
+        if (len(synth_genes) + len(synth_miscs) == 0):
             return None, None, None, None, None, None
 
         # set default time span if unspecified
@@ -1092,7 +1168,7 @@ class CellModelAuxiliary:
         sources = {}
         for i in range(0,len(xss)):
             e, l, F_r, nu, psi, T, D, D_nodeg = self.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts, xss[i, :, :],
-                                                                                    par, circuit_genes, circuit_miscs, circuit_name2pos)
+                                                                                    par, synth_genes, synth_miscs, modules_name2pos)
             # Create a ColumnDataSource object for the plot
             sources[i] = bkmodels.ColumnDataSource(data={
                 't': np.array(ts),
@@ -1260,52 +1336,92 @@ class CellModelAuxiliary:
 
 
 # DETERMINISTIC SIMULATION ---------------------------------------------------------------------------------------------
-# ODE simulator with DIFFRAX
-@functools.partial(jax.jit, static_argnums=(1,3,4))
-def ode_sim(par,  # dictionary with model parameters
-            ode_with_circuit,  # ODE function for the cell with the synthetic gene circuit
+def ode_sim_loop(par,  # dictionary with model parameters
+            ode_solver,  # ODE function for the cell with the synthetic gene circuit
+            controller_update,  # function for updating the controller memory
             x0,  # initial condition VECTOR
-            num_circuit_genes, num_circuit_miscs, circuit_name2pos, sgp4j,
-            # dictionaries with circuit gene and miscellaneous specie names, species name to vector position decoder, relevant synthetic gene parameters in jax.array form
-            tf, ts, rtol, atol,  # simulation parameters: time frame, when to save the system's state, relative and absolute tolerances
-            solver=Kvaerno3()  # ODE solver
+            ctrl_memo0,  # initial controller memory
+            num_synth_genes, num_synth_miscs, # number of synthetic genes and miscellaneous species in the circuit
+            synth_genes, synth_miscs, # dictionary with circuit gene and miscellaneous specie name
+            modules_name2pos, controller_name2pos, # variable name to position in the state vector decoders
+            sgp4j, # some synthetic gene parameters in jax.array form - for efficient simulation
+            tf,  # simulation time frame
+            meastimestep   # output measurement time window
             ):
-    # define the ODE term
-    vector_field = lambda t, y, args: ode_with_circuit(t, y, args)
-    term = ODETerm(vector_field)
+    # define the arguments for finding the next state vector
+    args = (par,
+            modules_name2pos, controller_name2pos,
+            num_synth_genes, num_synth_miscs,
+            sgp4j)
 
-    # define arguments of the ODE term
-    args = (
-        par,  # model parameters
-        circuit_name2pos,  # gene name - position in circuit vector decoder
-        num_circuit_genes, num_circuit_miscs,  # number of genes and miscellaneous species in the circuit
-        sgp4j  # relevant synthetic gene parameters in jax.array form
-    )
+    # time points at which we save the solution
+    ts = jnp.arange(tf[0], tf[1] + meastimestep / 2, meastimestep)
 
-    # define the time points at which we save the solution
-    stepsize_controller = PIDController(rtol=rtol, atol=atol)
-    saveat = SaveAt(ts=ts)
+    # make the retrieval of next simulator state a lambda-function for jax.lax.scanning
+    scan_step = lambda sim_state, t: ode_sim_step(sim_state, t,
+                                                  meastimestep,
+                                                  args,
+                                                  ode_solver, controller_update)
 
-    # solve the ODE
-    sol = diffeqsolve(term, solver,
-                      args=args,
-                      t0=tf[0], t1=tf[1], dt0=0.1, y0=x0, saveat=saveat,
-                      max_steps=None,
-                      stepsize_controller=stepsize_controller)
+    # define the jac.lax.scan function
+    ode_scan = lambda sim_state_rec0, ts: jax.lax.scan(scan_step, sim_state_rec0, ts)
+    ode_scan_jit = jax.jit(ode_scan)
 
-    # convert jax arrays into numpy arrays
-    return sol
+    # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
+    sim_state0 = {'t': tf[0], 'x': x0, 'ctrl_memo': ctrl_memo0,  # time, state vector, controller memory
+                  'tf': tf  # overall simulation time frame
+                  }
+
+    # run the simulation
+    _, sim_outcome = ode_scan_jit(sim_state0, ts)
+
+    # extract the simulation outcomes
+    t= sim_outcome[0]
+    xs = sim_outcome[1]
+    ctrl_memos = sim_outcome[2]
+
+    # return the simulation outcomes
+    return t, xs, ctrl_memos
+
+
+def ode_sim_step(sim_state, t,
+                 meastimestep,
+                 args,
+                 ode_solver, controller_update):
+    # get next measurement time
+    next_t = sim_state['t'] + meastimestep
+
+    # simulate the ODE until the next measurement
+    next_x = ode_solver(tf=(t, next_t),
+                        x0=sim_state['x'],
+                        ctrl_memo=sim_state['ctrl_memo'],
+                        args=args)
+
+    # update the controller memory
+    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], args)
+
+    # update the overall simulation state
+    next_sim_state = {'t': t+meastimestep,
+                      'x': next_x,
+                      'ctrl_memo': next_ctrl_memo,
+                      'tf': sim_state['tf']}
+
+    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'])
 
 
 # ode
-def ode(t, x, circuit_ode, args):
+def ode(t, x, # simulation time and state vector
+        ctrl_memo, # controller memory
+        module1_ode, module2_ode, # ODEs for the genetic modules
+        controller_ode, controller_action, # ODE and control action calculation for the controller
+        args):
     # unpack the args
     par = args[0]  # model parameters
-    circuit_name2pos = args[1]  # gene name - position in circuit vector decoder
-    num_circuit_genes = args[2];
-    num_circuit_miscs = args[3]  # number of genes and miscellaneous species in the circuit
+    modules_name2pos = args[1]  # gene name - position in circuit vector decoder
+    controller_name2pos = args[2]  # controller name - position in circuit vector decoder
+    num_synth_genes = args[3]; num_synth_miscs = args[4]  # number of genes and miscellaneous species in the circuit
     kplus_het, kminus_het, n_het, d_het = args[
-        4]  # unpack jax-arrayed synthetic gene parameters for calculating k values
+        5]  # unpack jax-arrayed synthetic gene parameters for calculating k values
 
     # give the state vector entries meaningful names
     m_a = x[0]  # metabolic gene mRNA
@@ -1316,13 +1432,13 @@ def ode(t, x, circuit_ode, args):
     tu = x[5]  # uncharged tRNAs
     s = x[6]  # nutrient quality (constant)
     h = x[7]  # INTERNAL chloramphenicol concentration (varies)
-    # synthetic circuit genes and miscellaneous species can be accessed directly from x with circuit_name2pos
+    # synthetic circuit genes and miscellaneous species can be accessed directly from x with modules_name2pos
 
     # FIND SPECIAL SYNTHETIC PROTEIN CONCENTRATIONS - IF PRESENT
     # chloramphenicol acetyltransferase (antibiotic reistance)
-    p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[circuit_name2pos['p_cat']], 0.0)
+    p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[modules_name2pos['p_cat']], 0.0)
     # synthetic protease (synthetic protein degradation)
-    p_prot = jax.lax.select(par['prot_gene_present'] == 1, x[circuit_name2pos['p_prot']], 0.0)
+    p_prot = jax.lax.select(par['prot_gene_present'] == 1, x[modules_name2pos['p_prot']], 0.0)
 
     # CALCULATE PHYSIOLOGICAL VARIABLES
     # translation elongation rate
@@ -1338,15 +1454,15 @@ def ode(t, x, circuit_ode, args):
     H = (par['K_D'] + h) / par['K_D']  # corection to ribosome availability due to chloramphenicol action
 
 
-    m_het_div_k_het = jnp.sum(x[8:8 + num_circuit_genes] / k_het)
+    m_het_div_k_het = jnp.sum(x[8:8 + num_synth_genes] / k_het)
 
     # heterologous mRNA levels scaled by RBS strength
-    m_het_div_k_het = jnp.sum(x[8:8 + num_circuit_genes] / k_het)
+    m_het_div_k_het = jnp.sum(x[8:8 + num_synth_genes] / k_het)
 
     # heterologous protein degradation flux
     prodeflux = jnp.sum(
         # (degradation rate times protease level times protein concnetration) times number of AAs per protein
-        d_het * p_prot * x[8 + num_circuit_genes:8 + num_circuit_genes * 2] * n_het
+        d_het * p_prot * x[8 + num_synth_genes:8 + num_synth_genes * 2] * n_het
     )
     prodeflux_times_H_div_eR = prodeflux * H / (e * R)  # degradation flux scaled by overall protein synthesis rate
 
@@ -1363,6 +1479,9 @@ def ode(t, x, circuit_ode, args):
     l = l_calc(par, e, B, prodeflux)  # growth rate
 
     psi = psi_calc(par, T)  # tRNA synthesis rate - AMENDED
+
+    # CONTROL ACTION CALCULATION
+    u = controller_action(t,x,ctrl_memo,par,modules_name2pos,controller_name2pos)
 
     # return dx/dt for the host cell
     dxdt = jnp.array([
@@ -1381,564 +1500,35 @@ def ode(t, x, circuit_ode, args):
                          # chloramphenicol concentration
                          par['diff_h'] * (par['h_ext'] - h) - h * p_cat / par['K_C'] - l * h
                      ] +
-                     circuit_ode(t, x, e, l, R, k_het, D, p_prot,
-                                 par, circuit_name2pos)
+                     module1_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
+                     +
+                     module2_ode(t, x, u, e, l, R, k_het, D, p_prot,
+                                 par, modules_name2pos)
+                     +
+                     controller_ode(t, x, e, l, R, k_het, D, p_prot,
+                                    par, modules_name2pos, controller_name2pos)
                      )
     return dxdt
 
 
-# TAU-LEAPING SIMULATION -----------------------------------------------------------------------------------------------
-def tauleap_sim(par,  # dictionary with model parameters
-                circuit_v,  # calculating the propensity vector for stochastic simulation of circuit expression
-                x0,  # initial condition VECTOR
-                num_circuit_genes, num_circuit_miscs, circuit_name2pos, # dictionaries with circuit gene and miscellaneous specie names, species name to vector position decoder,
-                sgp4j, # relevant synthetic gene parameters in jax.array form
-                tf, tau, tau_odestep, tau_savetimestep, # simulation parameters: time frame, tau-leap time step, number of ODE steps in each tau-leap step
-                mRNA_count_scales, S, circuit_synpos2genename, keys0, # parameter vectors for efficient simulation and reaction stoichiometry info - determined by tauleap_sim_prep!!
-                avg_dynamics = False # true if considering the deterministic cas with average dynamics of random variables
-                ):
-    # define the arguments for finding the next state vector
-    args = (
-        par,  # model parameters
-        circuit_name2pos,  # gene name - position in circuit vector decoder
-        num_circuit_genes, num_circuit_miscs,  # number of genes and miscellaneous species in the circuit
-        sgp4j,  # relevant synthetic gene parameters in jax.array form
-        mRNA_count_scales, S, circuit_synpos2genename  # parameters for stochastic simulation
-    )
-
-    # time points at which we save the solution
-    ts = jnp.arange(tf[0], tf[1] + tau_savetimestep/2, tau_savetimestep)
-
-    # number of ODE steps in each tau-leap step
-    ode_steps_in_tau = int(tau / tau_odestep)
-
-    # make the retrieval of next x a lambda-function for jax.lax.scanning
-    scan_step = lambda sim_state, t: tauleap_record_x(circuit_v, sim_state, t, tau, ode_steps_in_tau, args)
-
-    # define the jac.lax.scan function
-    tauleap_scan = lambda sim_state_rec0, ts: jax.lax.scan(scan_step, sim_state_rec0, ts)
-    tauleap_scan_jit = jax.jit(tauleap_scan)
-
-    # get initial conditions
-    if(len(x0.shape)==1): # if x0 common for all trajectories, copy it for each trajectory
-        x0s = jnp.repeat(x0.reshape((1, x0.shape[0])), keys0.shape[0], axis=0)
-    else: # otherwise, leave initial conditions as is
-        x0s=x0
-
-    # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
-    sim_state_rec0={'t': tf[0], 'x': x0s, # time, state vector
-                'key': keys0, # random number generator key
-                'tf': tf, # overall simulation time frame
-                'save_every_n_steps': int(tau_savetimestep/tau), # tau-leap steps between record points
-                'avg_dynamics': avg_dynamics # true if considering the deterministic cas with average dynamics of random variables
-                }
-
-    # vmapping - specify that we vmap over the random number generation keys
-    sim_state_vmap_axes = {'t': None, 'x': 0, # time, state vector
-                'key': 0, # random number generator key
-                'tf': None, # overall simulation time frame
-                'save_every_n_steps': None, # tau-leap steps between record points
-                'avg_dynamics': None # true if considering the deterministic cas with average dynamics of random variables
-                           }
-
-    # simulate (with vmapping)
-    sim_state_rec_final, xs = jax.jit(jax.vmap(tauleap_scan_jit, (sim_state_vmap_axes, None)))(sim_state_rec0, ts)
-
-    return ts, xs, sim_state_rec_final['key']
-
-
-# log the next trajectory point
-def tauleap_record_x(circuit_v, # calculating the propensity vector for stochastic simulation of circuit expression
-                     sim_state_record,  # simulator state
-                     t,  # time of last record
-                     tau,  # time step
-                     ode_steps_in_tau,  # number of ODE integration steps in each tau-leap step
-                     args):
-    # DEFINITION OF THE ACTUAL TAU-LEAP SIMULATION STEP
-    def tauleap_next_x(step_cntr,sim_state_tauleap):
-        # update t
-        next_t = sim_state_tauleap['t'] + tau
-
-        # update x
-        # find deterministic change in x
-        det_update = tauleap_integrate_ode(sim_state_tauleap['t'], sim_state_tauleap['x'], tau, ode_steps_in_tau, args)
-        # find stochastic change in x
-        stoch_update = tauleap_update_stochastically(sim_state_tauleap['t'], sim_state_tauleap['x'],
-                                                     tau, args, circuit_v,
-                                                     sim_state_tauleap['key'], sim_state_tauleap['avg_dynamics'])
-        # find next x
-        next_x_tentative = sim_state_tauleap['x'] + det_update + stoch_update
-        # make sure x has no negative entries
-        next_x = jax.lax.select(next_x_tentative < 0, jnp.zeros_like(next_x_tentative), next_x_tentative)
-        # next_x=jnp.multiply(next_x_tentative>=0,next_x_tentative)
-
-        # update key
-        next_key, _ = jax.random.split(sim_state_tauleap['key'], 2)
-
-        return {
-            # entries updated over the course of the tau-leap step
-            't': next_t, 'x': next_x,
-            'key': next_key,
-            # entries unchanged over the course of the tau-leap step
-            'tf': sim_state_tauleap['tf'],
-            'save_every_n_steps': sim_state_tauleap['save_every_n_steps'],
-            'avg_dynamics': sim_state_tauleap['avg_dynamics']
-        }
-
-
-    # FUNCTION BODY
-    # run tau-leap integration until the next state is to be saved
-    next_state_bytauleap = jax.lax.fori_loop(0,sim_state_record['save_every_n_steps'], tauleap_next_x, sim_state_record)
-
-    # update the overall simulator state
-    next_sim_state_record = {
-        # entries updated over the course of the tau-leap step
-        't': next_state_bytauleap['t'], 'x': next_state_bytauleap['x'],
-        'key': next_state_bytauleap['key'],
-        # entries unchanged
-        'tf': sim_state_record['tf'],
-        'save_every_n_steps': sim_state_record['save_every_n_steps'],
-        'avg_dynamics': sim_state_record['avg_dynamics']
-    }
-
-    return next_sim_state_record, sim_state_record['x']
-
-
-# ode integration - Euler method
-def tauleap_integrate_ode(t, x, tau, ode_steps_in_tau, args):
-    # def euler_step(ode_step, x):
-    #     return x + tauleap_ode(t + ode_step_size * ode_step, x, args) * ode_step_size
-    #
-    # ode_step_size = tau / ode_steps_in_tau
-    # # integrate the ODE
-    # x_new= jax.lax.fori_loop(0, ode_steps_in_tau, euler_step, x)
-    #
-    # return x_new - x
-    return tauleap_ode(t, x, args) * tau
-
-
-# ode for the deterministic part of the tau-leaping simulation
-def tauleap_ode(t, x, args):
-    # unpack the args
-    par = args[0]  # model parameters
-    circuit_name2pos = args[1]  # gene name - position in circuit vector decoder
-    num_circuit_genes = args[2]  # number of genes in the circuit
-    num_circuit_miscs = args[3]  # number of miscellaneous species in the circuit
-    kplus_het, kminus_het, n_het, d_het = args[
-        4]  # unpack jax-arrayed synthetic gene parameters for calculating k values
-
-    # give the state vector entries meaningful names
-    m_a = x[0]  # metabolic gene mRNA
-    m_r = x[1]  # ribosomal gene mRNA
-    p_a = x[2]  # metabolic proteins
-    R = x[3]  # non-inactivated ribosomes
-    tc = x[4]  # charged tRNAs
-    tu = x[5]  # uncharged tRNAs
-    s = x[6]  # nutrient quality (constant)
-    h = x[7]  # INTERNAL chloramphenicol concentration (varies)
-    # synthetic circuit genes and miscellaneous species can be accessed directly from x with circuit_name2pos
-
-    # FIND SPECIAL SYNTHETIC PROTEIN CONCENTRATIONS - IF PRESENT
-    # chloramphenicol acetyltransferase (antibiotic reistance)
-    p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[circuit_name2pos['p_cat']], 0.0)
-    # synthetic protease (synthetic protein degradation)
-    p_prot  = jax.lax.select(par['prot_gene_present'] == 1, x[circuit_name2pos['p_prot']], 0.0)
-
-    # CALCULATE PHYSIOLOGICAL VARIABLES
-    # translation elongation rate
-    e = e_calc(par, tc)
-
-    # ribosome dissociation constants
-    k_a = k_calc(e, par['k+_a'], par['k-_a'], par['n_a'])
-    k_r = k_calc(e, par['k+_r'], par['k-_r'], par['n_r'])
-    k_het = k_calc(e, kplus_het, kminus_het, n_het)
-
-    # ratio of charged to uncharged tRNAs
-    T = tc / tu
-
-    # corection to ribosome availability due to chloramphenicol action
-    H = (par['K_D'] + h) / par['K_D']
-
-    # heterologous mRNA levels scaled by RBS strength
-    m_het_div_k_het = jnp.sum(x[8:8 + num_circuit_genes] / k_het)
-
-    # heterologous protein degradation flux
-    prodeflux = jnp.sum(
-        # (degradation rate times protease level times protein concnetration) times number of AAs per protein
-        d_het * p_prot * x[8 + num_circuit_genes:8 + num_circuit_genes * 2] * n_het
-    )
-    prodeflux_times_H_div_eR = prodeflux * H / (e * R) # degradation flux scaled by overall protein synthesis rate
-
-    # resource competition denominator
-    m_notq_div_k_notq = m_a / k_a + m_r / k_r + m_het_div_k_het
-    mq_div_kq = (par['phi_q'] * (1 - prodeflux_times_H_div_eR) * m_notq_div_k_notq - par[
-        'phi_q'] * prodeflux_times_H_div_eR) / \
-                (1 - par['phi_q'] * (1 - prodeflux_times_H_div_eR))
-    D = H * (1 + mq_div_kq + m_notq_div_k_notq)
-    B = R * (1 / H - 1 / D)  # actively translating ribosomes (inc. those translating housekeeping genes)
-
-    nu = nu_calc(par, tu, s)  # tRNA charging rate
-
-    l = l_calc(par, e, B, prodeflux)  # growth rate
-
-    psi = psi_calc(par, T)  # tRNA synthesis rate - AMENDED
-
-    # continuously, we only consider charged aa-tRNA consumption by NATIVE protein translation
-    B_cont = R * (1 / H - 1 / D - jnp.sum(jnp.divide(x[8:8 + num_circuit_genes], k_het)) / D)
-
-    # return dx/dt for the host cell
-    return jnp.array([
-                         # mRNAs
-                         l * par['c_a'] * par['a_a'] - (par['b_a'] + l) * m_a,
-                         l * Fr_calc(par, T) * par['c_r'] * par['a_r'] - (par['b_r'] + l) * m_r,
-                         # metabolic protein p_a
-                         (e / par['n_a']) * (m_a / k_a / D) * R - l * p_a,
-                         # ribosomes
-                         (e / par['n_r']) * (m_r / k_r / D) * R - l * R,
-                         # tRNAs
-                         nu * p_a - l * tc - e * B_cont,
-                         l * psi - l * tu - nu * p_a + e * B_cont,
-                         # nutrient quality assumed constant
-                         0,
-                         # chloramphenicol concentration
-                         par['diff_h'] * (par['h_ext'] - h) - h * p_cat / par['K_C'] - l * h
-                     ] +
-                     [0] * (2 * num_circuit_genes) + [0] * num_circuit_miscs
-                     # synthetic gene expression considered stochastically
-                     )
-
-
-def tauleap_update_stochastically(t, x, tau, args, circuit_v,
-                                  key, avg_dynamics):
-    # PREPARATION
-    # unpack the arguments
-    par = args[0]  # model parameters
-    circuit_name2pos = args[1]  # gene name - position in circuit vector decoder
-    num_circuit_genes = args[2]  # number of genes in the circuit
-    num_circuit_miscs = args[3]  # number of miscellaneous species in the circuit
-    kplus_het, kminus_het, n_het, d_het = args[
-        4]  # unpack jax-arrayed synthetic gene parameters for calculating k values
-    # stochastic simulation arguments
-    mRNA_count_scales = args[5]
-    S = args[6]
-    circuit_synpos2genename = args[7]  # parameter vectors for efficient simulation and reaction stoichiometry info
-
-    # give the state vector entries meaningful names
-    m_a = x[0]  # metabolic gene mRNA
-    m_r = x[1]  # ribosomal gene mRNA
-    p_a = x[2]  # metabolic proteins
-    R = x[3]  # non-inactivated ribosomes
-    tc = x[4]  # charged tRNAs
-    tu = x[5]  # uncharged tRNAs
-    s = x[6]  # nutrient quality (constant)
-    h = x[7]  # INTERNAL chloramphenicol concentration (varies)
-    # synthetic circuit genes and miscellaneous species can be accessed directly from x with circuit_name2pos
-
-    # FIND SPECIAL SYNTHETIC PROTEIN CONCENTRATIONS - IF PRESENT
-    # chloramphenicol acetyltransferase (antibiotic reistance)
-    p_cat = jax.lax.select(par['cat_gene_present'] == 1, x[circuit_name2pos['p_cat']], 0.0)
-    # synthetic protease (synthetic protein degradation)
-    p_prot = jax.lax.select(par['prot_gene_present'] == 1, x[circuit_name2pos['p_prot']], 0.0)
-
-    # CALCULATE PHYSIOLOGICAL VARIABLES
-    # translation elongation rate
-    e = e_calc(par, tc)
-
-    # ribosome dissociation constants
-    k_a = k_calc(e, par['k+_a'], par['k-_a'], par['n_a'])
-    k_r = k_calc(e, par['k+_r'], par['k-_r'], par['n_r'])
-    k_het = k_calc(e, kplus_het, kminus_het, n_het)
-
-    T = tc / tu  # ratio of charged to uncharged tRNAs
-
-    H = (par['K_D'] + h) / par['K_D']  # corection to ribosome availability due to chloramphenicol action
-
-    m_het_div_k_het = jnp.sum(x[8:8 + num_circuit_genes] / k_het)  # heterologous protein synthesis flux
-    prodeflux = jnp.sum(
-        d_het * n_het * x[8 + num_circuit_genes:8 + num_circuit_genes * 2])  # heterologous protein degradation flux
-    prodeflux_times_H_div_eR = prodeflux * H / (e * R)
-
-    # resource competition denominator
-    m_notq_div_k_notq = m_a / k_a + m_r / k_r + m_het_div_k_het
-    mq_div_kq = (par['phi_q'] * (1 - prodeflux_times_H_div_eR) * m_notq_div_k_notq - par[
-        'phi_q'] * prodeflux_times_H_div_eR) / \
-                (1 - par['phi_q'] * (1 - prodeflux_times_H_div_eR))
-    D = H * (1 + mq_div_kq + m_notq_div_k_notq)
-    B = R * (1 / H - 1 / D)  # actively translating ribosomes (inc. those translating housekeeping genes)
-
-    nu = nu_calc(par, tu, s)  # tRNA charging rate
-
-    l = l_calc(par, e, B, prodeflux)  # growth rate
-
-    psi = psi_calc(par, T)  # tRNA synthesis rate - AMENDED
-
-    # continuously, we only consider charged aa-tRNA consumption by NATIVE protein translation
-    B_cont = (D - 1 - jnp.sum(jnp.divide(x[8:8 + num_circuit_genes], k_het))) / D * R
-
-    # FIND REACTION PROPENSITIES
-    v = jnp.array(circuit_v(t, x,  # time, cell state, external inputs
-                            e, l,  # translation elongation rate, growth rate
-                            R,  # ribosome count in the cell
-                            k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
-                            p_prot, # synthetic protease concentration
-                            mRNA_count_scales,  # scaling factors for synthetic gene mRNA counts
-                            par,  # system parameters
-                            circuit_name2pos
-                            ))
-
-    # RETURN THE NUMBER OF TIMES THAT EACH REACTION HAS OCCURRED
-    # or take the average if we're considering the deterministic case
-    return jax.lax.select(avg_dynamics, jnp.matmul(S, v * tau), jnp.matmul(S, jax.random.poisson(key=key, lam=v * tau)))
-
-
-# preparatory step creating the objects necessary for tau-leap simulation - DO NOT JIT
-def tauleap_sim_prep(par,  # dictionary with model parameters
-                     num_circuit_genes, num_circuit_miscs, circuit_name2pos,
-                     x0_det,  # initial condition found deterministically
-                     key_seeds=[0] # random key seed(s)
-                     ):
-    # DICTIONARY mapping positions of a synthetic gene in the list of all synthetic genes to their names
-    circuit_synpos2genename = {}
-    for name in circuit_name2pos.keys():
-        if (name[0] == 'm'):
-            circuit_synpos2genename[circuit_name2pos[name] - 8] = name[2:]
-
-    # PARAMETER VECTORS FOR EFFICIENT SIMULATION
-    # mRNA count scalings
-    mRNA_count_scales_np = np.zeros((num_circuit_genes))
-    for i in range(0, num_circuit_genes):
-        mRNA_count_scales_np[i] = par['n_' + circuit_synpos2genename[i]] / 25
-    mRNA_count_scales = jnp.array(mRNA_count_scales_np)
-
-    # STOICHIOMETRY MATRIX
-    S = gen_stoich_mat(par,
-                       circuit_name2pos, circuit_synpos2genename,
-                       num_circuit_genes, num_circuit_miscs,
-                       mRNA_count_scales)
-
-    # MAKE THE INITIAL CONDITION FOR TAU-LEAPING WITH APPROPRIATE INTEGER VALUES OF RANDOM VARIABLES
-    x0_det_np = np.array(x0_det)  # convert to numpy array for convenience
-    x0_tauleap_mrnas = np.multiply(np.round(x0_det_np[8:8 + num_circuit_genes] / mRNA_count_scales_np),
-                                   mRNA_count_scales_np)  # synthetic mRNA counts - must be a multiple of the corresponding scaling factors that acount for translation by multiple ribosomes
-    x0_tauleap_prots_and_miscs = np.round(
-        x0_det_np[8 + num_circuit_genes:])  # synthetic protein and miscellaneous species counts
-    x0_tauleap = np.concatenate((x0_det_np[0:8], x0_tauleap_mrnas, x0_tauleap_prots_and_miscs), axis=0)
-
-    # STARTING RANDOM NUMBER GENERATION KEY
-    key_seeds_jnp = jnp.array(key_seeds)
-    keys0 = jax.vmap(jax.random.PRNGKey)(key_seeds_jnp)
-
-    return mRNA_count_scales, S, x0_tauleap, circuit_synpos2genename, keys0
-
-
-# generate the stocihiometry matrix for heterologous genes (plus return total number of stochastic reactions) - DO NOT JIT
-def gen_stoich_mat(par,
-                   circuit_name2pos, circuit_synpos2genename,
-                   num_circuit_genes, num_circuit_miscs,
-                   mRNA_count_scales
+# ODE SOLVER INITIALISERS ----------------------------------------------------------------------------------------------
+def diffrax_solver(ode_with_circuit,
+                   rtol, atol,  # relative and absolute integration tolerances
+                   solver=Kvaerno3()  # ODE solver
                    ):
-    # unpack stochionmetry args
-    mRNA_count_scales_np = np.array(mRNA_count_scales)
 
-    # find the number of stochastic reactions that can occur
-    num_stoch_reactions = num_circuit_genes * (3 +  # synthesis/degradation/dilution of mRNA
-                                               3)  # synthesis/degradation/dilution of protein
-    if ('cat_pb' in circuit_name2pos.keys()):  # plus, might need to model stochastic action of integrase
-        num_stoch_reactions += 2 + 2  # functional CAT gene forward and reverse strain exchange, LR site-integrase dissociation due to conformation change and plasmid replication
+    # define the time points at which we save the solution
+    stepsize_controller = PIDController(rtol=rtol, atol=atol)
 
-    # initialise (in numpy format)
-    S = np.zeros((8 + 2 * num_circuit_genes + num_circuit_miscs, num_stoch_reactions))
-
-    # initialise thge counter of reactions in S
-    reaction_cntr = 0
-
-    # mRNA - reactions common for all genes
-    for i in range(0, num_circuit_genes):
-        S[8 + i, reaction_cntr] = mRNA_count_scales_np[i]  # mRNA synthesis
-        reaction_cntr += 1
-        S[8 + i, reaction_cntr] = -mRNA_count_scales_np[i]  # mRNA degradation
-        reaction_cntr += 1
-        S[8 + i, reaction_cntr] = -mRNA_count_scales_np[i]  # mRNA dilution
-        reaction_cntr += 1
-
-    # protein - reactions common for all genes
-    for i in range(0, num_circuit_genes):
-        S[8 + num_circuit_genes + i, reaction_cntr] = 1  # protein synthesis
-        S[4, reaction_cntr] = -par[
-            'n_' + circuit_synpos2genename[i]]  # includes tRNA unchraging during translation(-tc)
-        S[5, reaction_cntr] = par['n_' + circuit_synpos2genename[i]]  # includes tRNA unchraging during translation(+tu)
-        reaction_cntr += 1
-        S[8 + num_circuit_genes + i, reaction_cntr] = -1  # protein degradation
-        reaction_cntr += 1
-        S[8 + num_circuit_genes + i, reaction_cntr] = -1  # protein dilution
-        reaction_cntr += 1
-
-    if ('cat_pb' in circuit_name2pos.keys()):  # stochastic action of integrase
-        # CAT gene forward strain exchange: from cat_pb to cat_lri1
-        S[8 + 2 * num_circuit_genes, reaction_cntr] = -1  # cat_pb decreased
-        S[8 + 2 * num_circuit_genes + 1, reaction_cntr] = 1  # cat_lri1 increased
-        reaction_cntr += 1
-
-        # CAT gene reverse strain exchange: from cat_lri1 to cat_pb
-        S[8 + 2 * num_circuit_genes, reaction_cntr] = 1  # cat_pb increased
-        S[8 + 2 * num_circuit_genes + 1, reaction_cntr] = -1  # cat_lri1 decreased
-        reaction_cntr += 1
-
-        # LR site-integrase dissociation due to conformation change
-        S[8 + 2 * num_circuit_genes + 1, reaction_cntr] = -1  # cat_lri1 decreased
-        reaction_cntr += 1
-
-        # LR site-integrase dissociation due to plasmid replication
-        S[8 + 2 * num_circuit_genes + 1, reaction_cntr] = -1  # cat_lri1 decreased
-        reaction_cntr += 1
-
-    return jnp.array(S)
-
-
-# TAU-LEAPING SIMULATION FOR SWITCHING DETECTION (MEMORY-EFFICIENT) ----------------------------------------------------
-# simulate to find switching time
-def tauleap_sim_switch(par,  # dictionary with model parameters
-                circuit_v,  # calculating the propensity vector for stochastic simulation of circuit expression
-                x0,  # initial condition VECTOR
-                num_circuit_genes, num_circuit_miscs, circuit_name2pos, # dictionaries with circuit gene and miscellaneous specie names, species name to vector position decoder,
-                sgp4j, # relevant synthetic gene parameters in jax.array form
-                tf, tau, tau_odestep, tau_checkswitchstep, # simulation parameters: time frame, tau-leap time step, number of ODE steps in each tau-leap step
-                mRNA_count_scales, S, circuit_synpos2genename, keys0, # parameter vectors for efficient simulation and reaction stoichiometry info - determined by tauleap_sim_prep!!
-                switch_condition, # function that returns true if the switching condition is met
-                switch_condition1 # additional function that returns true if the switching condition is met
-                ):
-    # define the arguments for finding the next state vector
-    args = (
-        par,  # model parameters
-        circuit_name2pos,  # gene name - position in circuit vector decoder
-        num_circuit_genes, num_circuit_miscs,  # number of genes and miscellaneous species in the circuit
-        sgp4j,  # relevant synthetic gene parameters in jax.array form
-        mRNA_count_scales, S, circuit_synpos2genename  # parameters for stochastic simulation
-    )
-
-    # time points at which we save the solution
-    num_checkswitchsteps = int((tf[1] - tf[0]) / tau_checkswitchstep)
-
-    # number of ODE steps in each tau-leap step
-    ode_steps_in_tau = int(tau / tau_odestep)
-
-    # make the retrieval of next x a lambda-function for jax.lax.scanning
-    loop_step = lambda i, sim_state: tauleap_check_switch(circuit_v, sim_state, i, tau, ode_steps_in_tau, args,
-                                                          switch_condition, switch_condition1)
-
-    # define the jac.lax.scan function
-    tauleap_loop = lambda sim_state_rec0: jax.lax.fori_loop(0, num_checkswitchsteps, loop_step, sim_state_rec0)
-    tauleap_loop_jit = jax.jit(tauleap_loop)
-
-    # get initial conditions
-    if(len(x0.shape)==1): # if x0 common for all trajectories, copy it for each trajectory
-        x0s = jnp.repeat(x0.reshape((1, x0.shape[0])), keys0.shape[0], axis=0)
-    else: # otherwise, leave initial conditions as is
-        x0s=x0
-
-    # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
-    sim_state_rec0={'t': tf[0], 'x': x0s, # time, state vector
-                'key': keys0, # random number generator key
-                'tf': tf, # overall simulation time frame
-                'check_every_n_steps': int(tau_checkswitchstep/tau), # tau-leap steps between record points
-                'switch_time_index': jnp.zeros(keys0.shape[0],dtype=jnp.int64), # times of switching, originally set to 0 as a placeholder
-                'switch_time_index1': jnp.zeros(keys0.shape[0],dtype=jnp.int64),#jnp.zeros(keys0.shape[0],dtype=jnp.int64), # times of switching, originally set to 0 as a placeholder
-                'avg_dynamics': False # true if considering the deterministic case with average dynamics of random variables
-                }
-
-    # vmapping - specify that we vmap over the random number generation keys
-    sim_state_vmap_axes = {'t': None, 'x': 0, # time, state vector
-                'key': 0, # random number generator key
-                'tf': None, # overall simulation time frame
-                'check_every_n_steps': None, # tau-leap steps between record points
-                'switch_time_index': 0, # time of switching individual for each trajectory
-                'switch_time_index1': 0, # time of switching individual for each trajectory
-                'avg_dynamics': None # true if considering the deterministic cas with average dynamics of random variables
-                           }
-
-    # simulate (with vmapping)
-    sim_state_rec_final = jax.jit(jax.vmap(tauleap_loop_jit, (sim_state_vmap_axes,)))(sim_state_rec0)
-
-    # get switch times from indices - WILL GIVE TIME SINCE START OF SIMULATION, NOT SINCE T=0!
-    switch_times=tau_checkswitchstep*sim_state_rec_final['switch_time_index']
-    switch_times1=tau_checkswitchstep*sim_state_rec_final['switch_time_index1']
-
-    return switch_times, switch_times1, sim_state_rec_final['key']
-
-
-# check if the next trajectory point is a switching point
-def tauleap_check_switch(circuit_v,  # calculating the propensity vector for stochastic simulation of circuit expression
-                         sim_state_record,  # simulator state
-                         i,  # number of steps that is being checked
-                         tau,  # time step
-                         ode_steps_in_tau,  # number of ODE integration steps in each tau-leap step
-                         args,  # arguments for the simulation
-                         switch_condition,  # function that returns true if the switching condition is met
-                         switch_condition1  # additional function that returns true if the switching condition is met
-                         ):
-    # DEFINITION OF THE ACTUAL TAU-LEAP SIMULATION STEP
-    def tauleap_next_x(step_cntr,sim_state_tauleap):
-        # update t
-        next_t = sim_state_tauleap['t'] + tau
-
-        # update x
-        # find deterministic change in x
-        det_update = tauleap_integrate_ode(sim_state_tauleap['t'], sim_state_tauleap['x'], tau, ode_steps_in_tau, args)
-        # find stochastic change in x
-        stoch_update = tauleap_update_stochastically(sim_state_tauleap['t'], sim_state_tauleap['x'],
-                                                     tau, args, circuit_v,
-                                                     sim_state_tauleap['key'], sim_state_tauleap['avg_dynamics'])
-        # find next x
-        next_x_tentative = sim_state_tauleap['x'] + det_update + stoch_update
-        # make sure x has no negative entries
-        next_x = jax.lax.select(next_x_tentative < 0, jnp.zeros_like(next_x_tentative), next_x_tentative)
-        # next_x=jnp.multiply(next_x_tentative>=0,next_x_tentative)
-
-        # update key
-        next_key, _ = jax.random.split(sim_state_tauleap['key'], 2)
-
-        return {
-            # entries updated over the course of the tau-leap step
-            't': next_t, 'x': next_x,
-            'key': next_key,
-            # entries unchanged over the course of the tau-leap step
-            'tf': sim_state_tauleap['tf'],
-            'check_every_n_steps': sim_state_tauleap['check_every_n_steps'],
-            'switch_time_index': sim_state_tauleap['switch_time_index'],
-            'switch_time_index1': sim_state_tauleap['switch_time_index1'],
-            'avg_dynamics': sim_state_tauleap['avg_dynamics']
-        }
-
-
-    # FUNCTION BODY
-    # run tau-leap integration until the next state is to be saved
-    next_state_bytauleap = jax.lax.fori_loop(0,sim_state_record['check_every_n_steps'], tauleap_next_x, sim_state_record)
-
-    # check if the switching condition is met, record switching time if yes and not already switched
-    switched=switch_condition(sim_state_record['x'],next_state_bytauleap['x'])
-    next_state_bytauleap['switch_time_index']=jax.lax.select(jnp.logical_and(switched,sim_state_record['switch_time_index']==0),
-                                                             i+1, sim_state_record['switch_time_index'])
-
-    # check the additional switching condition
-    switched1=switch_condition1(sim_state_record['x'],next_state_bytauleap['x'])
-    next_state_bytauleap['switch_time_index1']=jax.lax.select(jnp.logical_and(switched1,sim_state_record['switch_time_index1']==0),
-                                                              i+1, sim_state_record['switch_time_index1'])
-
-    # update the overall simulator state
-    next_sim_state_record = {
-        # entries updated over the course of the tau-leap step
-        't': next_state_bytauleap['t'], 'x': next_state_bytauleap['x'],
-        'key': next_state_bytauleap['key'],
-        # entries unchanged
-        'tf': sim_state_record['tf'],
-        'check_every_n_steps': sim_state_record['check_every_n_steps'],
-        'switch_time_index': next_state_bytauleap['switch_time_index'],
-        'switch_time_index1': next_state_bytauleap['switch_time_index1'],
-        'avg_dynamics': sim_state_record['avg_dynamics']
-    }
-
-    return next_sim_state_record
-
+    # define ODE solver
+    ode_solver = lambda tf, x0, ctrl_memo, args: diffeqsolve(
+                    ODETerm(lambda t, x, args: ode_with_circuit(t, x, ctrl_memo, args)),
+                    solver,
+                    args=args,
+                    t0=tf[0], t1=tf[1], dt0=0.1, y0=x0,
+                    max_steps=None,
+                    stepsize_controller=stepsize_controller).ys[-1]
+    return ode_solver
 
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
 def main():
@@ -1948,131 +1538,63 @@ def main():
 
     # initialise cell model
     cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
-    par = cellmodel_auxil.default_params()  # get default parameter values
-    init_conds = cellmodel_auxil.default_init_conds(par)  # get default initial conditions
+    cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
+    init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
 
-    # load synthetic gene circuit - WITH HYBRID SIMULATION SUPPORT
-    ode_with_circuit, circuit_F_calc, par, init_conds, circuit_genes, circuit_miscs, circuit_name2pos, circuit_styles, circuit_v = cellmodel_auxil.add_circuit(
-        circuits.oneconstitutive_cat_initialise,
-        circuits.oneconstitutive_cat_ode,
-        circuits.oneconstitutive_cat_F_calc,
-        par, init_conds,
-        # propensity calculation function for hybrid simulations
-        circuits.oneconstitutive_cat_v)
+    # load synthetic genetic modules and the controller
+    ode, \
+    module1_F_calc, module2_F_calc, controller_action, controller_update, \
+    par, init_conds, \
+    synth_genes, synth_miscs, \
+    modules_name2pos, modules_styles, controller_name2pos, \
+    module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
+        # module 1
+        gms.constfp_initialise,  # function initialising the circuit
+        gms.constfp_ode,  # function defining the circuit ODEs
+        gms.constfp_F_calc,
+        # function calculating the circuit genes' transcription regulation functions
+        # module 2
+        gms.cicc_initialise,  # function initialising the circuit
+        gms.cicc_ode,  # function defining the circuit ODEs
+        gms.cicc_F_calc,
+        # function calculating the circuit genes' transcription regulation functions
+        # controller
+        ctrls.cci_initialise,  # function initialising the controller
+        ctrls.cci_action,  # function calculating the controller action
+        ctrls.cci_ode,  # function defining the controller ODEs
+        ctrls.cci_update,  # function updating the controller based on measurements
+        # cell model parameters and initial conditions
+        cellmodel_par, init_conds)
 
-    # burdensome gene
-    par['c_xtra'] = 100.0
-    par['a_xtra'] = 1000.0
-
-    # punisher parameters
-    par['c_switch'] = 10.0  # gene concentration (nM)
-    par['a_switch'] = 100.0  # promoter strength (unitless)
-    par['c_int'] = 10.0  # gene concentration (nM)
-    par['a_int'] = 60.0  # promoter strength (unitless)
-    par['d_int'] = 6.0  # integrase protein degradation rate (to avoid unnecessary punishment)
-    par['c_cat'] = 10.0  # gene concentration (nM)
-    par['a_cat'] = 500.0*7  # promoter strength (unitless)
-    par['d_cat']=6.0
-
-    # punisher's transcription regulation function
-    par['K_switch'] = 625.0  # Half-saturation constant for the self-activating switch gene promoter (nM)
-    par['eta_switch'] = 2
-
-    # Hill coefficient for the self-activating switch gene promoter (unitless)
-    par['baseline_switch'] = 0.025  # Baseline value of the switch gene's transcription activation function
-    par['p_switch_ac_frac'] = 0.83  # active fraction of protein (i.e. share of molecules bound by the inducer)
-
-    # culture medium
-    init_conds['s'] = 0.3
-    par['h_ext'] =  10.5 * (10.0 ** 3)
-
-    # par['c_xtra'] = 0.0
-    # par['c_cat'] = 0.0
-
-    # DETERMINISTIC SIMULATION TO FIND THE STARTING STEADY STATE
+    # DETERMINISTIC SIMULATION
     # set simulation parameters
-    tf = (0, 50)  # simulation time frame
-    savetimestep = 0.1  # save time step
-    dt_max = 0.1  # maximum integration step
-    rtol = 1e-6  # relative tolerance for the ODE solver
-    atol = 1e-6  # absolute tolerance for the ODE solver
+    tf = (0, 30)  # simulation time frame
 
-    # simulate
-    sol = ode_sim(par,  # dictionary with model parameters
-                  ode_with_circuit,  # ODE function for the cell with synthetic circuit
-                  cellmodel_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
-                  # initial condition VECTOR
-                  len(circuit_genes), len(circuit_miscs), circuit_name2pos,
-                  # dictionaries with circuit gene and miscellaneous specie names, species name to vector position decoder
-                  cellmodel_auxil.synth_gene_params_for_jax(par, circuit_genes),
-                  # synthetic gene parameters for calculating k values
-                  tf, jnp.arange(tf[0], tf[1], savetimestep),  # time axis for saving the system's state
-                  rtol,
-                  atol)  # simulation parameters: when to save the system's state, relative and absolute tolerances)   # simulation parameters: time frame, save time step, relative and absolute tolerances
-    ts = np.array(sol.ts)
-    xs = np.array(sol.ys)
-    # det_steady_x = jnp.concatenate((sol.ys[-1, 0:8], jnp.round(sol.ys[-1, 8:])))
-    det_steady_x = sol.ys[-1, :]
+    # measurement time step
+    meastimestep = 0.1  # hours
 
-    # HYBRID SIMULATION
-    # tau-leap hybrid simulation parameters
-    tf_hybrid = (tf[-1], tf[-1] + 1)  # simulation time frame
-    tau = 1e-7  # simulation time step
-    tau_odestep = 1e-7  # number of ODE integration steps in a single tau-leap step (smaller than tau)
-    tau_savetimestep = 1e-2  # save time step a multiple of tau
+    # choose ODE solver
+    ode_solver = diffrax_solver(ode,
+                                rtol=1e-6, atol=1e-6,
+                                solver=Kvaerno3())
 
-    # simulate
-    timer = time.time()
-    mRNA_count_scales, S, x0_tauleap, circuit_synpos2genename, keys0 = tauleap_sim_prep(par, len(circuit_genes),
-                                                                                        len(circuit_miscs),
-                                                                                        circuit_name2pos, det_steady_x,
-                                                                                        key_seeds=[0, 1, 2, 3, 4, 5, 6, 7, 8 ,9])
-    ts_jnp, xs_jnp, final_keys = tauleap_sim(par,  # dictionary with model parameters
-                                 circuit_v,  # circuit reaction propensity calculator
-                                 x0_tauleap, # initial condition VECTOR (processed to make sure random variables are appropriate integers)
-                                 len(circuit_genes), len(circuit_miscs), circuit_name2pos,
-                                 cellmodel_auxil.synth_gene_params_for_jax(par, circuit_genes), # synthetic gene parameters for calculating k values
-                                 tf_hybrid, tau, tau_odestep, tau_savetimestep,  # simulation parameters: time frame, tau leap step size, number of ode integration steps in a single tau leap step
-                                 mRNA_count_scales, S, circuit_synpos2genename, # mRNA count scaling factor, stoichiometry matrix, synthetic gene number in list of synth. genes to name decoder
-                                 keys0) # starting random number genereation key
-
-    # concatenate the results with the deterministic simulation
-    ts = np.concatenate((ts, np.array(ts_jnp)))
-    xs_first = np.concatenate((xs, np.array(xs_jnp[1]))) # getting the results from the first random number generator key in vmap
-    xss = np.concatenate((xs*np.ones((keys0.shape[0],1,1)),np.array(xs_jnp)),axis=1) # getting the results from all vmapped trajectories
-
-    print('tau-leap simulation time: ', time.time() - timer)
-
-    # PLOT - HOST CELL MODEL
-    bkplot.output_file(filename="sundry plots/cellmodel_sim.html",
-                       title="Cell Model Simulation")  # set up bokeh output file
-    mass_fig = cellmodel_auxil.plot_protein_masses(ts, xs_first, par, circuit_genes)  # plot simulation results
-    nat_mrna_fig, nat_prot_fig, nat_trna_fig, h_fig = cellmodel_auxil.plot_native_concentrations_multiple(ts, xss, par,
-                                                                                                 circuit_genes,
-                                                                                              tspan=(tf[-1] - (tf_hybrid[-1] - tf_hybrid[0]), tf_hybrid[-1]),
-                                                                                                          simtraj_alpha=0.1)  # plot simulation results
-    l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure = cellmodel_auxil.plot_phys_variables_multiple(ts, xss, par,
-                                                                                                           circuit_genes,
-                                                                                                           circuit_miscs,
-                                                                                                           circuit_name2pos,
-                                                                                                           tspan=(tf[-1] - (tf_hybrid[-1] -tf_hybrid[0]),tf_hybrid[-1]),
-                                                                                                        simtraj_alpha=0.1)  # plot simulation results
-    bkplot.save(bklayouts.grid([[None, nat_mrna_fig, nat_prot_fig],
-                                [nat_trna_fig, h_fig, l_figure],
-                                [e_figure, Fr_figure, D_figure]]))
-
-    # PLOT - SYNTHETIC GENE CIRCUIT
-    bkplot.output_file(filename="sundry plots/circuit_sim.html",
-                       title="Synthetic Gene Circuit Simulation")  # set up bokeh output file
-    het_mrna_fig, het_prot_fig, misc_fig = cellmodel_auxil.plot_circuit_concentrations_multiple(ts, xss, par, circuit_genes,
-                                                                                       circuit_miscs, circuit_name2pos,
-                                                                                       circuit_styles, tspan=( tf[-1] - (tf_hybrid[-1] - tf_hybrid[0]), tf_hybrid[-1]),
-                                                                                                simtraj_alpha=0.1)  # plot simulation results
-    F_fig = cellmodel_auxil.plot_circuit_regulation_multiple(ts, xss, par, circuit_F_calc, circuit_genes, circuit_miscs,
-                                                    circuit_name2pos, circuit_styles, tspan=(tf[-1] - (tf_hybrid[-1] - tf_hybrid[0]), tf_hybrid[-1]),
-                                                    simtraj_alpha=0.1)  # plot simulation results
-    bkplot.save(bklayouts.grid([[het_mrna_fig, het_prot_fig, misc_fig],
-                                [F_fig, None, None]]))
+    # solve ODE
+    timer= time.time()
+    t, xs, ctrl_memos = ode_sim_loop(par,
+                                     ode_solver, controller_update,
+                                     cellmodel_auxil.x0_from_init_conds(init_conds,
+                                                                        par,
+                                                                        synth_genes, synth_miscs,
+                                                                        modules_name2pos, controller_name2pos),
+                                     jnp.array([]),  # empty controller memory
+                                     len(synth_genes), len(synth_miscs),
+                                     # number of synthetic genes and miscellaneous species
+                                     synth_genes, synth_miscs,  # lists of synthetic genes and miscellaneous species
+                                     modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
+                                     cellmodel_auxil.synth_gene_params_for_jax(par,synth_genes),  # synthetic gene parameters in jax.array form
+                                     tf, meastimestep,  # simulation time frame and measurement time step
+                                     )
+    print('Simulation time: ', time.time()-timer, ' s')
 
     return
 

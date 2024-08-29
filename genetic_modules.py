@@ -1,0 +1,283 @@
+'''
+GENETIC_MODULES.PY: Describing different synthetic gene circuits
+for the Python/Jax implementation of the coarse-grained resource-aware E.coli model
+'''
+
+
+# PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
+import jax.numpy as jnp
+import jax.lax as lax
+import numpy as np
+
+# NO SYNTHETIC GENES ---------------------------------------------------------------------------------------------------
+# initialise all the necessary parameters to simulate the circuit
+# return the default parameters and initial conditions, species name to ODE vector position decoder and plot colour palette
+def nocircuit_initialise():
+    default_par={'cat_gene_present':0, 'prot_gene_present':0} # chloramphenicol resistance or synthetic protease gene not present, natrually
+    default_init_conds={}
+    genes={}
+    miscs={}
+    name2pos={'p_cat':0, } # placeholders, will never be used but required for correct execution'}
+    circuit_colours={}
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_colours
+
+# transcription regulation functions
+def nocircuit_F_calc(t ,x, par, name2pos):
+    return jnp.array([])
+
+# ode
+def nocircuit_ode(F_calc,     # calculating the transcription regulation functions
+            t,  x,  # time, cell state, external inputs
+            e, l, # translation elongation rate, growth rate
+            R, # ribosome count in the cell, resource
+            k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
+            p_prot, # synthetic protease concentration
+            par,  # system parameters
+            name2pos  # name to position decoder
+            ):
+    # RETURN THE ODE
+    return []
+
+
+# stochastic reaction propensities for hybrid tau-leaping simulations
+def nocircuit_v(F_calc,     # calculating the transcription regulation functions
+            t,  x,  # time, cell state, external inputs
+            e, l, # translation elongation rate, growth rate
+            R, # ribosome count in the cell, resource
+            k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
+            p_prot, # synthetic protease concentration
+            mRNA_count_scales, # scaling factors for mRNA counts
+            par,  # system parameters
+            name2pos
+            ):
+    # RETURN THE PROPENSITIES
+    return []
+
+
+
+# CONSTITUTIVELY EXPRESSED FLUORESCENT PROTEIN -------------------------------------------------------------------------
+# initialise all the necessary parameters to simulate the circuit
+# return the default parameters and initial conditions, species name to ODE vector position decoder and plot colour palette
+def constfp_initialise():
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    genes = ['ofp']  # names of genes in the circuit: output fluorescent protein
+    miscs = []  # names of miscellaneous species involved in the circuit (e.g. metabolites)
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['m_' + genes[i]] = 8 + i  # mRNA
+        name2pos['p_' + genes[i]] = 8 + len(genes) + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) * 2 + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['k_' + genes[i]] =  i  # effective mRNA-ribosome dissociation constants (in k_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] =  i  # transcription regulation functions (in F, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes: # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['c_' + gene] = 1.0  # copy no. (nM)
+        default_par['a_' + gene] = 100.0  # promoter strength (unitless)
+        default_par['b_' + gene] = 6.0  # mRNA decay rate (/h)
+        default_par['k+_' + gene] = 60.0  # ribosome binding rate (/h/nM)
+        default_par['k-_' + gene] = 60.0  # ribosome unbinding rate (/h)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par['d_' + gene] = 0.0  # rate of active protein degradation by synthetic protease - zero by default (/h/nM)
+
+    # special genes - must be handled in a particular way if not presemt
+    # chloramphenicol acetlytransferase gene - antibiotic resistance
+    if ('cat' in genes):
+        default_par['cat_gene_present'] = 1  # chloramphenicol resistance gene present
+    else:
+        default_par['cat_gene_present'] = 0  # chloramphenicol resistance gene absent
+        # add placeholder to the position decoder dictionary - will never be used but are required for correct execution
+        name2pos['p_cat']=0
+    # synthetic protease gene - synthetic protein degradation
+    if ('prot' in genes):
+        default_par['prot_gene_present'] = 1
+    else:
+        default_par['prot_gene_present'] = 0
+        name2pos['p_prot']=0
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['m_' + gene] = 0
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#0072BD", "#D95319", "#4DBEEE", "#A2142F", "#FF00FF"]
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
+
+# transcription regulation functions
+def constfp_F_calc(t ,x, u, par, name2pos):
+    F_ofp = 1 # constitutive gene
+    return jnp.array([F_ofp])
+
+# ode
+def constfp_ode(F_calc,     # calculating the transcription regulation functions
+            t,  x,  # time, cell state
+            u, # controller input
+            e, l, # translation elongation rate, growth rate
+            R, # ribosome count in the cell, resource
+            k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
+            p_prot, # synthetic protease concentration
+            par,  # system parameters
+            name2pos  # name to position decoder
+            ):
+    # GET REGULATORY FUNCTION VALUES
+    F = F_calc(t, x, u, par, name2pos)
+
+    # RETURN THE ODE
+    return [# mRNAs
+            par['func_ofp'] * l * F[name2pos['F_ofp']] * par['c_ofp'] * par['a_ofp'] - (par['b_ofp'] + l) * x[name2pos['m_ofp']],
+            # proteins
+            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']]
+    ]
+
+
+# CHEMICALLY INDUCED, CYBERCONTROLLED GENE [tau-leap compatible, includes a synthetic protease]-------------------------
+def cicc_initialise():
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    # names of genes in the circuit
+    genes = ['ta',  # transcription activation factor
+             'b']  # burdensome controlled gene
+    # names of miscellaneous species involved in the circuit (none)
+    miscs = []
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['m_' + genes[i]] = 8 + i  # mRNA
+        name2pos['p_' + genes[i]] = 8 + len(genes) + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) * 2 + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['k_' + genes[i]] =  i  # effective mRNA-ribosome dissociation constants (in k_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes: # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['c_' + gene] = 1.0  # copy no. (nM)
+        default_par['a_' + gene] = 100.0  # promoter strength (unitless)
+        default_par['b_' + gene] = 6.0  # mRNA decay rate (/h)
+        default_par['k+_' + gene] = 60.0  # ribosome binding rate (/h/nM)
+        default_par['k-_' + gene] = 60.0  # ribosome unbinding rate (/h)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par['d_' + gene] = 0.0  # rate of active protein degradation by synthetic protease - zero by default (/h/nM)
+
+    # special genes - must be handled in a particular way if not presemt
+    # chloramphenicol acetlytransferase gene - antibiotic resistance
+    if ('cat' in genes):
+        default_par['cat_gene_present'] = 1  # chloramphenicol resistance gene present
+    else:
+        default_par['cat_gene_present'] = 0  # chloramphenicol resistance gene absent
+        # add placeholder to the position decoder dictionary - will never be used but are required for correct execution
+        name2pos['p_cat'] = 0
+    # synthetic protease gene - synthetic protein degradation
+    if ('prot' in genes):
+        default_par['prot_gene_present'] = 1
+    else:
+        default_par['prot_gene_present'] = 0
+        name2pos['p_prot'] = 0
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['m_' + gene] = 0
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # transcription regulation function
+    default_par['K_ta-i'] = 100 # dissociation constant of the ta-inducer binding
+    default_par['K_tai-dna'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_tai-dna'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['baseline'] = 0.1 # baseline expression of the burdensome gene
+
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#0072BD", "#D95319", "#4DBEEE", "#A2142F", "#FF00FF"]
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles={'colours':{}, 'dashes':{}} # initialise dictionary
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
+
+# transcription regulation functions
+def cicc_F_calc(t ,x,
+                u,  # controller input: external inducer concentration
+                par, name2pos):
+    F_ta = 1 # constitutive gene
+
+    # burdensome gene expression is regulated by the ta protein
+    tai_conc = x[name2pos['p_ta']] * u/(u+par['K_ta-i'])
+    F_b = par['baseline'] + (1 - par['baseline']) * (tai_conc**par['eta_tai-dna'])/(tai_conc**par['eta_tai-dna']+par['K_tai-dna']**par['eta_tai-dna'])
+    return jnp.array([F_ta,
+            F_b])
+
+# ode
+def cicc_ode(F_calc,     # calculating the transcription regulation functions
+            t,  x,  # time, cell state
+            u, # controller input
+            e, l, # translation elongation rate, growth rate
+            R, # ribosome count in the cell, resource
+            k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
+            p_prot, # synthetic protease concentration
+            par,  # system parameters
+            name2pos  # name to position decoder
+            ):
+    # GET REGULATORY FUNCTION VALUES
+    F = F_calc(t, x, u, par, name2pos)
+
+    # RETURN THE ODE
+    return [# mRNAs
+            par['func_ta'] * l * F[name2pos['F_ta']] * par['c_ta'] * par['a_ta'] - (par['b_ta'] + l) * x[name2pos['m_ta']],
+            par['func_b'] * l * F[name2pos['F_b']] * par['c_b'] * par['a_b'] - (par['b_b'] + l) * x[name2pos['m_b']],
+            # proteins
+            (e / par['n_ta']) * (x[name2pos['m_ta']] / k_het[name2pos['k_ta']] / D) * R - (l + par['d_ta']*p_prot) * x[name2pos['p_ta']],
+            (e / par['n_b']) * (x[name2pos['m_b']] / k_het[name2pos['k_b']] / D) * R - (l + par['d_b']*p_prot) * x[name2pos['p_b']],
+    ]

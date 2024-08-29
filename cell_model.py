@@ -110,19 +110,44 @@ class CellModelAuxiliary:
         modules_styles = module1_styles.copy()
         modules_styles.update(module2_styles)
         
-        # merge name-to-position dictionaries for the two modules: requires shifting the position of the second module's species
+        # merge name-to-position dictionaries for the two modules: requires rearranging the variables
+        # new order in x: module 1 mRNAs - module 2 mRNAs - module 1 proteins - module 2 proteins - module 1 misc - module 2 misc
+        # new order in k (mRNA-ribosome dissociation constants): module 1 - module 2
+        # order in F the same
         modules_name2pos = module1_name2pos.copy()
-        x_entries_for_module_1 = len(module1_genes) * 2 + len(module1_miscs)  # number of entries for the first module in the state vector
-        for key in module2_name2pos.keys():
-            if((key[0:2]=='m_') or (key[0:2]== 'p')): # for mRNA and protein species, shift position by the number of species in x for the first module - IF the gene is present
-                if((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') or (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
-                    modules_name2pos[key] = module2_name2pos[key] + x_entries_for_module_1
-            elif(key[0:2] == 'k_'): # for synthetic mRNA-ribosome dissociation constants, shift position by the number of GENES in the first module
-                modules_name2pos[key] = module2_name2pos[key] + len(module1_genes)
-            elif(key[0:2] == 'F_'): # for transcription regulation functions, no shift necessary
-                modules_name2pos[key] = module2_name2pos[key]
-            else: # the rest is miscellaneous species, shift position by the number of species in x for the first module
-                modules_name2pos[key] = module2_name2pos[key] + x_entries_for_module_1
+        modules_name2pos.update(module2_name2pos)
+        for key in modules_name2pos.keys():
+            # module 1 mRNAs kept as they are
+            if((key[0:2]=='m_') and (key in module1_name2pos)):
+                continue
+            # module 2 mRNAs shifted by the number of module 1 mRNAs
+            elif((key[0:2]=='m_') and (key in module2_name2pos)):
+                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') or (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                    modules_name2pos[key] = modules_name2pos[key] + len(module1_genes)
+            # module 1 proteins shifted by the number of module 2 mRNAs
+            elif((key[0:2]=='p_') and (key in module1_name2pos)):
+                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') and (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                    modules_name2pos[key] = modules_name2pos[key] + len(module2_genes)
+            # module 2 proteins shifted by the number of module 1 mRNAs and proteins
+            elif((key[0:2]=='p_') and (key in module2_name2pos)):
+                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') and (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                    modules_name2pos[key] = modules_name2pos[key] + 2 * len(module1_genes)
+            # module 1 k values kept as they are
+            elif((key[0:2]=='k_') and (key in module1_name2pos)):
+                continue
+            # module 2 k values shifted by the number of module 1 mRNAs
+            elif((key[0:2]=='k_') and (key in module2_name2pos)):
+                modules_name2pos[key] = modules_name2pos[key] + len(module1_genes)
+            # module 1 and 2 F values kept as they are
+            elif((key[0:2]=='F_')):
+                continue
+            else: # miscellaneous species
+                #  module 1 misc shifted by the number of module 2 mRNAs and proteins
+                if(key in module1_name2pos):
+                    modules_name2pos[key] = module1_name2pos[key] + 2 * len(module2_genes)
+                #  module 1 misc shifted by the number of module 1 mRNAs, proteins and miscs
+                else:
+                    modules_name2pos[key] = module2_name2pos[key] + 2 * len(module1_genes) +len(module1_miscs)
 
         # merge gene and miscellaneous species lists
         synth_genes = module1_genes + module2_genes
@@ -159,17 +184,19 @@ class CellModelAuxiliary:
             module2_v_with_F_calc = None
 
         # add the geetic module and controller ODEs (as well as control action calculator) to that of the host cell model
-        cellmodel_ode = lambda t, x, ctrl_memo, args: ode(t, x, ctrl_memo,
-                                                          module1_ode_with_F_calc, module2_ode_with_F_calc,
-                                                          controller_ode, controller_action,
-                                                          args)
+        cellmodel_ode = lambda t, x, args: ode(t, x,
+                                         # ctrl_memo,
+                                         module1_ode_with_F_calc, module2_ode_with_F_calc,
+                                         controller_ode, controller_action,
+                                         args)
 
         # return updated ode and parameter, initial conditions, circuit gene (and miscellaneous specie) names
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
         return (cellmodel_ode,
                 module1_F_calc, module2_F_calc, controller_action, controller_update,
                 cellmodel_par, cellmodel_init_conds,
-                synth_genes, synth_miscs,
+                (synth_genes, module1_genes, module2_genes),
+                (synth_miscs, module1_miscs, module2_miscs),
                 modules_name2pos, modules_styles, controller_name2pos,
                 module1_v_with_F_calc, module2_v_with_F_calc)
 
@@ -309,165 +336,189 @@ class CellModelAuxiliary:
 
     # PLOT RESULTS, CALCULATE CELLULAR VARIABLES
     # plot protein composition of the cell by mass over time
-    # def plot_protein_masses(self, ts, xs,
-    #                         par, synth_genes,  # model parameters, list of circuit genes
-    #                         dimensions=(320, 180), tspan=None):
-    #     # set default time span if unspecified
-    #     if (tspan == None):
-    #         tspan = (ts[0], ts[-1])
-    # 
-    #     # create figure
-    #     mass_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="Protein mass, aa",
-    #         x_range=tspan,
-    #         title='Protein masses',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    # 
-    #     flip_t = np.flip(ts)  # flipped time axis for patch plotting
-    # 
-    #     # plot heterologous protein mass - if there are any heterologous proteins to begin with
-    #     if (len(synth_genes) != 0):
-    #         bottom_line = np.zeros(xs.shape[0])
-    #         top_line = bottom_line + np.sum(xs[:, 8 + len(synth_genes):8 + len(synth_genes) * 2] * np.array(
-    #             self.synth_gene_params_for_jax(par, synth_genes)[2], ndmin=2), axis=1)
-    #         mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-    #                           line_width=0.5, line_color='black', fill_color=self.gene_colours['het'],
-    #                           legend_label='het')
-    #     else:
-    #         top_line = np.zeros(xs.shape[0])
-    # 
-    #     # plot mass of inactivated ribosomes
-    #     if ((xs[:, 7] != 0).any()):
-    #         bottom_line = top_line
-    #         top_line = bottom_line + xs[:, 3] * par['n_r'] * (xs[:, 7] / (par['K_D'] + xs[:, 7]))
-    #         mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-    #                           line_width=0.5, line_color='black', fill_color=self.gene_colours['h'], legend_label='R:h')
-    # 
-    #     # plot mass of active ribosomes - only if there are any to begin with
-    #     bottom_line = top_line
-    #     top_line = bottom_line + xs[:, 3] * par['n_r'] * (par['K_D'] / (par['K_D'] + xs[:, 7]))
-    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['r'],
-    #                       legend_label='R (free)')
-    # 
-    #     # plot metabolic protein mass
-    #     bottom_line = top_line
-    #     top_line = bottom_line + xs[:, 2] * par['n_a']
-    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['a'], legend_label='p_a')
-    # 
-    #     # plot housekeeping protein mass
-    #     bottom_line = top_line
-    #     top_line = bottom_line / (1 - par['phi_q'])
-    #     mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
-    #                       line_width=0.5, line_color='black', fill_color=self.gene_colours['q'], legend_label='p_q')
-    # 
-    #     # add legend
-    #     mass_figure.legend.label_text_font_size = "8pt"
-    #     mass_figure.legend.location = "top_right"
-    # 
-    #     return mass_figure
-    # 
-    # # plot mRNA, protein and tRNA concentrations over time
-    # def plot_native_concentrations(self, ts, xs,
-    #                                par, synth_genes,  # model parameters, list of circuit genes
-    #                                dimensions=(320, 180), tspan=None):
-    #     # set default time span if unspecified
-    #     if (tspan == None):
-    #         tspan = (ts[0], ts[-1])
-    # 
-    #     # Create a ColumnDataSource object for the plot
-    #     source = bkmodels.ColumnDataSource(data={
-    #         't': ts,
-    #         'm_a': xs[:, 0],  # metabolic mRNA
-    #         'm_r': xs[:, 1],  # ribosomal mRNA
-    #         'p_a': xs[:, 2],  # metabolic protein
-    #         'R': xs[:, 3],  # ribosomal protein
-    #         'tc': xs[:, 4],  # charged tRNA
-    #         'tu': xs[:, 5],  # uncharged tRNA
-    #         's': xs[:, 6],  # nutrient quality
-    #         'h': xs[:, 7],  # chloramphenicol concentration
-    #         'm_het': np.sum(xs[:, 8:8 + len(synth_genes)], axis=1),  # heterologous mRNA
-    #         'p_het': np.sum(xs[:, 8 + len(synth_genes):8 + len(synth_genes) * 2], axis=1),  # heterologous protein
-    #     })
-    # 
-    #     # PLOT mRNA CONCENTRATIONS
-    #     mRNA_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="mRNA conc., nM",
-    #         x_range=tspan,
-    #         title='mRNA concentrations',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    #     mRNA_figure.line(x='t', y='m_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
-    #                      legend_label='m_a')  # plot metabolic mRNA concentrations
-    #     mRNA_figure.line(x='t', y='m_r', source=source, line_width=1.5, line_color=self.gene_colours['r'],
-    #                      legend_label='m_r')  # plot ribosomal mRNA concentrations
-    #     mRNA_figure.line(x='t', y='m_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
-    #                      legend_label='m_het')  # plot heterologous mRNA concentrations
-    #     mRNA_figure.legend.label_text_font_size = "8pt"
-    #     mRNA_figure.legend.location = "top_right"
-    #     mRNA_figure.legend.click_policy = 'hide'
-    # 
-    #     # PLOT protein CONCENTRATIONS
-    #     protein_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="Protein conc., nM",
-    #         x_range=tspan,
-    #         title='Protein concentrations',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    #     protein_figure.line(x='t', y='p_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
-    #                         legend_label='p_a')  # plot metabolic protein concentrations
-    #     protein_figure.line(x='t', y='R', source=source, line_width=1.5, line_color=self.gene_colours['r'],
-    #                         legend_label='R')  # plot ribosomal protein concentrations
-    #     protein_figure.line(x='t', y='p_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
-    #                         legend_label='p_het')  # plot heterologous protein concentrations
-    #     protein_figure.legend.label_text_font_size = "8pt"
-    #     protein_figure.legend.location = "top_right"
-    #     protein_figure.legend.click_policy = 'hide'
-    # 
-    #     # PLOT tRNA CONCENTRATIONS
-    #     tRNA_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="tRNA conc., nM",
-    #         x_range=tspan,
-    #         title='tRNA concentrations',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    #     tRNA_figure.line(x='t', y='tc', source=source, line_width=1.5, line_color=self.tRNA_colours['tc'],
-    #                      legend_label='tc')  # plot charged tRNA concentrations
-    #     tRNA_figure.line(x='t', y='tu', source=source, line_width=1.5, line_color=self.tRNA_colours['tu'],
-    #                      legend_label='tu')  # plot uncharged tRNA concentrations
-    #     tRNA_figure.legend.label_text_font_size = "8pt"
-    #     tRNA_figure.legend.location = "top_right"
-    #     tRNA_figure.legend.click_policy = 'hide'        
-    # 
-    #     # PLOT INTRACELLULAR CHLORAMPHENICOL CONCENTRATION
-    #     h_figure = bkplot.figure(
-    #         frame_width=dimensions[0],
-    #         frame_height=dimensions[1],
-    #         x_axis_label="t, hours",
-    #         y_axis_label="h, nM",
-    #         x_range=tspan,
-    #         title='Intracellular chloramphenicol concentration',
-    #         tools="box_zoom,pan,hover,reset"
-    #     )
-    #     h_figure.line(x='t', y='h', source=source, line_width=1.5, line_color=self.gene_colours['h'],
-    #                   legend_label='h')  # plot intracellular chloramphenicol concentration
-    # 
-    #     return mRNA_figure, protein_figure, tRNA_figure, h_figure
-    # 
+    def plot_protein_masses(self, ts, xs,
+                            par, # model parameters
+                            synth_genes, synth_miscs, # list of circuit genes and miscellaneous species
+                            modules_name2pos, # dictionary mapping gene names to their positions in the state vector
+                            dimensions=(320, 180), tspan=None):
+        # set default time span if unspecified
+        if (tspan == None):
+            tspan = (ts[0], ts[-1])
+
+        # create figure
+        mass_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="Protein mass, aa",
+            x_range=tspan,
+            title='Protein masses',
+            tools="box_zoom,pan,hover,reset"
+        )
+
+        flip_t = np.flip(ts)  # flipped time axis for patch plotting
+
+        # plot heterologous protein mass - if there are any heterologous proteins to begin with
+        if (len(synth_genes) != 0):
+            bottom_line = np.zeros(xs.shape[0])
+            top_line = np.zeros(xs.shape[0])
+            # include heterologous protein mass
+            for gene in synth_genes:
+                top_line += xs[:, modules_name2pos['p_' + gene]] * par['n_' + gene]
+
+            # some miscellaneous species may be heterologous proteins having undergone some changes
+            for misc in synth_miscs:
+                if (misc[0:2] == 'p_'):
+                    top_line += xs[:, modules_name2pos[misc]] * par['n_' + misc[2:]]
+
+            mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+                              line_width=0.5, line_color='black', fill_color=self.gene_colours['het'],
+                              legend_label='het')
+        else:
+            top_line = np.zeros(xs.shape[0])
+
+        # plot mass of inactivated ribosomes
+        if ((xs[:, 7] != 0).any()):
+            bottom_line = top_line
+            top_line = bottom_line + xs[:, 3] * par['n_r'] * (xs[:, 7] / (par['K_D'] + xs[:, 7]))
+            mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+                              line_width=0.5, line_color='black', fill_color=self.gene_colours['h'], legend_label='R:h')
+
+        # plot mass of active ribosomes - only if there are any to begin with
+        bottom_line = top_line
+        top_line = bottom_line + xs[:, 3] * par['n_r'] * (par['K_D'] / (par['K_D'] + xs[:, 7]))
+        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+                          line_width=0.5, line_color='black', fill_color=self.gene_colours['r'],
+                          legend_label='R (free)')
+
+        # plot metabolic protein mass
+        bottom_line = top_line
+        top_line = bottom_line + xs[:, 2] * par['n_a']
+        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+                          line_width=0.5, line_color='black', fill_color=self.gene_colours['a'], legend_label='p_a')
+
+        # plot housekeeping protein mass
+        bottom_line = top_line
+        top_line = bottom_line / (1 - par['phi_q'])
+        mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
+                          line_width=0.5, line_color='black', fill_color=self.gene_colours['q'], legend_label='p_q')
+
+        # add legend
+        mass_figure.legend.label_text_font_size = "8pt"
+        mass_figure.legend.location = "top_right"
+
+        return mass_figure
+
+    # plot mRNA, protein and tRNA concentrations over time
+    def plot_native_concentrations(self, ts, xs,
+                                   par, # model parameters
+                                   synth_genes, synth_miscs,  # list of circuit genes and miscellaneous species
+                                      modules_name2pos,  # dictionary mapping gene names to their positions in the state vector
+                                   dimensions=(320, 180), tspan=None):
+        # set default time span if unspecified
+        if (tspan == None):
+            tspan = (ts[0], ts[-1])
+
+        # get total concentrations of synthetic mRNAs and proteins
+        m_het = np.zeros(xs.shape[0])
+        p_het = np.zeros(xs.shape[0])
+        for gene in synth_genes:
+            m_het += xs[:, modules_name2pos['m_' + gene]]
+            p_het += xs[:, modules_name2pos['p_' + gene]]
+        for misc in synth_miscs: # some miscellaneous species may be heterologous mRNAs or proteins having undergone some changes
+            if (misc[0:2] == 'm_'):
+                m_het += xs[:, modules_name2pos[misc]]
+            elif (misc[0:2] == 'p_'):
+                p_het += xs[:, modules_name2pos[misc]]
+
+        # Create a ColumnDataSource object for the plot
+        source = bkmodels.ColumnDataSource(data={
+            't': ts,
+            'm_a': xs[:, 0],  # metabolic mRNA
+            'm_r': xs[:, 1],  # ribosomal mRNA
+            'p_a': xs[:, 2],  # metabolic protein
+            'R': xs[:, 3],  # ribosomal protein
+            'tc': xs[:, 4],  # charged tRNA
+            'tu': xs[:, 5],  # uncharged tRNA
+            's': xs[:, 6],  # nutrient quality
+            'h': xs[:, 7],  # chloramphenicol concentration
+            'm_het': m_het,  # heterologous mRNA
+            'p_het': p_het,  # heterologous protein
+        })
+
+        # PLOT mRNA CONCENTRATIONS
+        mRNA_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="mRNA conc., nM",
+            x_range=tspan,
+            title='mRNA concentrations',
+            tools="box_zoom,pan,hover,reset"
+        )
+        mRNA_figure.line(x='t', y='m_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
+                         legend_label='m_a')  # plot metabolic mRNA concentrations
+        mRNA_figure.line(x='t', y='m_r', source=source, line_width=1.5, line_color=self.gene_colours['r'],
+                         legend_label='m_r')  # plot ribosomal mRNA concentrations
+        mRNA_figure.line(x='t', y='m_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
+                         legend_label='m_het')  # plot heterologous mRNA concentrations
+        mRNA_figure.legend.label_text_font_size = "8pt"
+        mRNA_figure.legend.location = "top_right"
+        mRNA_figure.legend.click_policy = 'hide'
+
+        # PLOT protein CONCENTRATIONS
+        protein_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="Protein conc., nM",
+            x_range=tspan,
+            title='Protein concentrations',
+            tools="box_zoom,pan,hover,reset"
+        )
+        protein_figure.line(x='t', y='p_a', source=source, line_width=1.5, line_color=self.gene_colours['a'],
+                            legend_label='p_a')  # plot metabolic protein concentrations
+        protein_figure.line(x='t', y='R', source=source, line_width=1.5, line_color=self.gene_colours['r'],
+                            legend_label='R')  # plot ribosomal protein concentrations
+        protein_figure.line(x='t', y='p_het', source=source, line_width=1.5, line_color=self.gene_colours['het'],
+                            legend_label='p_het')  # plot heterologous protein concentrations
+        protein_figure.legend.label_text_font_size = "8pt"
+        protein_figure.legend.location = "top_right"
+        protein_figure.legend.click_policy = 'hide'
+
+        # PLOT tRNA CONCENTRATIONS
+        tRNA_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="tRNA conc., nM",
+            x_range=tspan,
+            title='tRNA concentrations',
+            tools="box_zoom,pan,hover,reset"
+        )
+        tRNA_figure.line(x='t', y='tc', source=source, line_width=1.5, line_color=self.tRNA_colours['tc'],
+                         legend_label='tc')  # plot charged tRNA concentrations
+        tRNA_figure.line(x='t', y='tu', source=source, line_width=1.5, line_color=self.tRNA_colours['tu'],
+                         legend_label='tu')  # plot uncharged tRNA concentrations
+        tRNA_figure.legend.label_text_font_size = "8pt"
+        tRNA_figure.legend.location = "top_right"
+        tRNA_figure.legend.click_policy = 'hide'
+
+        # PLOT INTRACELLULAR CHLORAMPHENICOL CONCENTRATION
+        h_figure = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="h, nM",
+            x_range=tspan,
+            title='Intracellular chloramphenicol concentration',
+            tools="box_zoom,pan,hover,reset"
+        )
+        h_figure.line(x='t', y='h', source=source, line_width=1.5, line_color=self.gene_colours['h'],
+                      legend_label='h')  # plot intracellular chloramphenicol concentration
+
+        return mRNA_figure, protein_figure, tRNA_figure, h_figure
+
     # # plot concentrations for the synthetic circuits
     # def plot_circuit_concentrations(self, ts, xs,
     #                                 par, synth_genes, synth_miscs, modules_name2pos,
@@ -1394,8 +1445,7 @@ def ode_sim_step(sim_state, t,
     # simulate the ODE until the next measurement
     next_x = ode_solver(tf=(t, next_t),
                         x0=sim_state['x'],
-                        ctrl_memo=sim_state['ctrl_memo'],
-                        args=args)
+                        args=args+(sim_state['ctrl_memo'],))
 
     # update the controller memory
     next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], args)
@@ -1411,7 +1461,7 @@ def ode_sim_step(sim_state, t,
 
 # ode
 def ode(t, x, # simulation time and state vector
-        ctrl_memo, # controller memory
+        #ctrl_memo, # controller memory
         module1_ode, module2_ode, # ODEs for the genetic modules
         controller_ode, controller_action, # ODE and control action calculation for the controller
         args):
@@ -1419,9 +1469,13 @@ def ode(t, x, # simulation time and state vector
     par = args[0]  # model parameters
     modules_name2pos = args[1]  # gene name - position in circuit vector decoder
     controller_name2pos = args[2]  # controller name - position in circuit vector decoder
-    num_synth_genes = args[3]; num_synth_miscs = args[4]  # number of genes and miscellaneous species in the circuit
+    num_synth_genes, num_synth_genes1, num_synth_genes2 = args[3] # number of synthetic genes: total and for each module
+    num_synth_miscs, num_synth_miscs1, num_synth_miscs2 = args[4]  # number of miscellaneous species: total and for each module
     kplus_het, kminus_het, n_het, d_het = args[
         5]  # unpack jax-arrayed synthetic gene parameters for calculating k values
+
+    # get the controller memory
+    ctrl_memo = args[6]
 
     # give the state vector entries meaningful names
     m_a = x[0]  # metabolic gene mRNA
@@ -1483,6 +1537,10 @@ def ode(t, x, # simulation time and state vector
     # CONTROL ACTION CALCULATION
     u = controller_action(t,x,ctrl_memo,par,modules_name2pos,controller_name2pos)
 
+    # GENETIC MODULE ODE CALCULATION
+    module1_ode_value = module1_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
+    module2_ode_value = module2_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
+
     # return dx/dt for the host cell
     dxdt = jnp.array([
                          # mRNAs
@@ -1499,30 +1557,38 @@ def ode(t, x, # simulation time and state vector
                          0,
                          # chloramphenicol concentration
                          par['diff_h'] * (par['h_ext'] - h) - h * p_cat / par['K_C'] - l * h
-                     ] +
-                     module1_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
+                     ]
+                    +
+                    # add synthetic mRNA ODEs
+                    module1_ode_value[0:num_synth_genes1] + module2_ode_value[0:num_synth_genes2]
                      +
-                     module2_ode(t, x, u, e, l, R, k_het, D, p_prot,
-                                 par, modules_name2pos)
-                     +
-                     controller_ode(t, x, e, l, R, k_het, D, p_prot,
-                                    par, modules_name2pos, controller_name2pos)
+                    # add synthetic protein ODEs
+                    module1_ode_value[num_synth_genes1:num_synth_genes1*2] + module2_ode_value[num_synth_genes2:num_synth_genes2*2]
+                    +
+                    # add miscellaneous species ODEs
+                    module1_ode_value[num_synth_genes1*2:] + module2_ode_value[num_synth_genes2*2:]
+                    +
+                    # add controller ODEs
+                    controller_ode(t, x, e, l, R, k_het, D, p_prot, par, modules_name2pos, controller_name2pos)
                      )
     return dxdt
 
 
 # ODE SOLVER INITIALISERS ----------------------------------------------------------------------------------------------
-def diffrax_solver(ode_with_circuit,
+def diffrax_solver(ode_complete,
                    rtol, atol,  # relative and absolute integration tolerances
                    solver=Kvaerno3()  # ODE solver
                    ):
+    # define ODE term
+    vector_field = lambda t, y, args: ode_complete(t, y, args)
+    term = ODETerm(vector_field)
 
     # define the time points at which we save the solution
     stepsize_controller = PIDController(rtol=rtol, atol=atol)
 
     # define ODE solver
-    ode_solver = lambda tf, x0, ctrl_memo, args: diffeqsolve(
-                    ODETerm(lambda t, x, args: ode_with_circuit(t, x, ctrl_memo, args)),
+    ode_solver = lambda tf, x0, args: diffeqsolve(
+                    term,
                     solver,
                     args=args,
                     t0=tf[0], t1=tf[1], dt0=0.1, y0=x0,
@@ -1545,7 +1611,7 @@ def main():
     ode, \
     module1_F_calc, module2_F_calc, controller_action, controller_update, \
     par, init_conds, \
-    synth_genes, synth_miscs, \
+    synth_genes_total_and_each, synth_miscs_total_and_each, \
     modules_name2pos, modules_styles, controller_name2pos, \
     module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
         # module 1
@@ -1566,6 +1632,21 @@ def main():
         # cell model parameters and initial conditions
         cellmodel_par, init_conds)
 
+    # unpack the synthetic genes and miscellaneous species lists
+    synth_genes= synth_genes_total_and_each[0]
+    module1_genes = synth_genes_total_and_each[1]
+    module2_genes = synth_genes_total_and_each[2]
+    synth_miscs= synth_miscs_total_and_each[0]
+    module1_miscs = synth_miscs_total_and_each[1]
+    module2_miscs = synth_miscs_total_and_each[2]
+
+    # SET PARAMETERS
+    # set the parameters for the synthetic genes
+    par['c_ofp']=100
+    par['a_ofp']=1000
+    par['c_b']=100
+    par['a_b']=1000
+
     # DETERMINISTIC SIMULATION
     # set simulation parameters
     tf = (0, 30)  # simulation time frame
@@ -1580,22 +1661,42 @@ def main():
 
     # solve ODE
     timer= time.time()
-    t, xs, ctrl_memos = ode_sim_loop(par,
+    ts_jnp, xs_jnp, ctrl_memos_jnp = ode_sim_loop(par,
                                      ode_solver, controller_update,
                                      cellmodel_auxil.x0_from_init_conds(init_conds,
                                                                         par,
                                                                         synth_genes, synth_miscs,
                                                                         modules_name2pos, controller_name2pos),
                                      jnp.array([]),  # empty controller memory
-                                     len(synth_genes), len(synth_miscs),
+                       (len(synth_genes),len(module1_genes), len(module2_genes)),  # number of synthetic genes
+                       (len(synth_miscs),len(module1_miscs), len(module2_miscs)),   # number of miscellaneous species
                                      # number of synthetic genes and miscellaneous species
                                      synth_genes, synth_miscs,  # lists of synthetic genes and miscellaneous species
                                      modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
                                      cellmodel_auxil.synth_gene_params_for_jax(par,synth_genes),  # synthetic gene parameters in jax.array form
                                      tf, meastimestep,  # simulation time frame and measurement time step
                                      )
-    print('Simulation time: ', time.time()-timer, ' s')
 
+    # convert simulation results to numpy arrays
+    ts = np.array(ts_jnp)
+    xs = np.array(xs_jnp)
+    ctrl_memos = np.array(ctrl_memos_jnp)
+
+    print('Simulation time: ', time.time()-timer, ' s')
+    
+    # make plots
+    # PLOT - HOST CELL MODEL
+    bkplot.output_file(filename="cellmodel_sim.html",
+                       title="Cell Model Simulation")  # set up bokeh output file
+    mass_fig = cellmodel_auxil.plot_protein_masses(ts, xs, par, synth_genes, synth_miscs, modules_name2pos)  # plot simulation results
+    nat_mrna_fig, nat_prot_fig, nat_trna_fig, h_fig = cellmodel_auxil.plot_native_concentrations(ts, xs,
+                                                                                                 par,
+                                                                                                 synth_genes,
+                                                                                                 synth_miscs,
+                                                                                                 modules_name2pos)  # plot simulation results
+    bkplot.save(bklayouts.grid([[mass_fig, nat_mrna_fig, nat_prot_fig],
+                                [nat_trna_fig, h_fig, None]]))
+    
     return
 
 

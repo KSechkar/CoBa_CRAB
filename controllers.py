@@ -91,6 +91,7 @@ def cci_ode(F_calc,     # calculating the transcription regulation functions
 # update controller memory based on measurements
 def cci_update(t, x, # time, cell state
                ctrl_memo, # controller memory
+               par, # system parameters
                modules_name2pos, # genetic module name to position decoder
                controller_name2pos # controller name to position decoder
                ):

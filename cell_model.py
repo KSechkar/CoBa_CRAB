@@ -719,7 +719,7 @@ class CellModelAuxiliary:
                 frame_width=dimensions[0],
                 frame_height=dimensions[1],
                 x_axis_label="t, hours",
-                y_axis_label="Memo values",
+                y_axis_label="Memory values",
                 x_range=tspan,
                 title='Controller memory',
                 tools="box_zoom,pan,hover,reset"
@@ -1164,9 +1164,10 @@ def ode_sim_step(sim_state, t,
                         args=args+(sim_state['ctrl_memo'],))
 
     # update the controller memory
-    modules_name2pos = args[1]
-    controller_name2pos = args[2]
-    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], modules_name2pos, controller_name2pos)
+    # par= args[0]
+    # modules_name2pos = args[1]
+    # controller_name2pos = args[2]
+    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], args[0], args[1], args[2])
 
     # update the overall simulation state
     next_sim_state = {'t': t+meastimestep,

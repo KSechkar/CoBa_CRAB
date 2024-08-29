@@ -88,7 +88,7 @@ def cci_ode(F_calc,     # calculating the transcription regulation functions
     # RETURN THE ODE
     return [0.0]
 
-# update controller memory based on measurements
+#  update controller memory based on measurements
 def cci_update(t, x, # time, cell state
                ctrl_memo, # controller memory
                par, # system parameters

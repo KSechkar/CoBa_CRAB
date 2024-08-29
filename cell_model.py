@@ -708,7 +708,7 @@ class CellModelAuxiliary:
         if (len(memos) == 0):
             memo_fig = None
         else:
-            # Create a ColumnDataSource object for the plot
+            # create a ColumnDataSource object for the plot
             data_for_column = {'t': ts}
             for i in range(0, len(memos)):
                 data_for_column[memos[i]] = ctrl_memorecord[:, i]

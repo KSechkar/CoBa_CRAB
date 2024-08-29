@@ -262,7 +262,7 @@ def cicc_F_calc(t ,x,
     return jnp.array([F_ta,
             F_b])
 
-# ode
+# ODE
 def cicc_ode(F_calc,     # calculating the transcription regulation functions
             t,  x,  # time, cell state
             u, # controller input

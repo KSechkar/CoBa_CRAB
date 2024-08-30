@@ -37,14 +37,15 @@ def no_switching_initialise():
 
 # switch if it's time to do so
 def no_switching_switch(i_ref,  # current reference index
-                       refs,  # list of references
-                       t_last_ref_switch,  # time of last reference switch
-                       t, x,
-                       ctrl_memo,
-                       par,  # system parameters
-                       modules_name2pos,  # genetic module name to position decoder
-                       controller_name2pos  # controller name to position decoder
-                       ):
+                        refs,  # list of references
+                        t_last_ref_switch,  # time of last reference switch
+                        t, x,
+                        ctrl_memo,
+                        par,  # system parameters
+                        modules_name2pos,  # genetic module name to position decoder
+                        controller_name2pos,  # controller name to position decoder
+                        meastimestep  # measurement time step
+                        ):
     i_next = i_ref  # no switching
     t_last_ref_switch_next = t_last_ref_switch  # no switching
     return (i_next, t_last_ref_switch_next)
@@ -70,10 +71,12 @@ def timed_switching_switch(i_ref,  # current reference index
                            ctrl_memo,
                            par,  # system parameters
                            modules_name2pos,  # genetic module name to position decoder
-                           controller_name2pos  # controller name to position decoder
+                           controller_name2pos,  # controller name to position decoder
+                           meastimestep  # measurement time step
                            ):
     # -------- DEFINE SPECIFIC SWITCHING CONDITIONS FROM HERE...
-    condition = (t - par['t_switch_ref'] >= t_last_ref_switch)
+    condition = (t + meastimestep/2 >= t_last_ref_switch + par['t_switch_ref'])  # switch every t_switch_ref hours
+    # (half of the measurement time step is added to the current time to avoid rounding errors)
     # -------- ...TO HERE
 
     return jax.lax.cond(condition, switch, no_switch,

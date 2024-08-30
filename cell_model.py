@@ -1244,15 +1244,16 @@ def ode_sim_step(sim_state, t,
     # par= args[0]
     # modules_name2pos = args[1]
     # controller_name2pos = args[2]
-    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], refs[sim_state['i_ref']], args[0], args[1], args[2])
+    next_ctrl_memo = controller_update(next_t, next_x, sim_state['ctrl_memo'], refs[sim_state['i_ref']], args[0], args[1], args[2])
 
-    # check if it is time to switch the reference
+    # check if by next measurement it will be time to switch the reference
     next_i_ref, next_t_last_ref_switch = ref_switcher(sim_state['i_ref'],  # current reference index
                                                       refs,  # list of references
                                                       sim_state['t_last_ref_switch'],  # time of last reference switch
-                                                      sim_state['t'], sim_state['x'],
-                                                      sim_state['ctrl_memo'],
-                                                      args[0], args[1], args[2])
+                                                      next_t, next_x,
+                                                      next_ctrl_memo,
+                                                      args[0], args[1], args[2],
+                                                      meastimestep)
 
     # update the overall simulation state
     next_sim_state = {'t': next_t,
@@ -1346,7 +1347,7 @@ def main():
     meastimestep = 0.1  # hours
 
     # choose ODE solver
-    # ode_solver, us_size = odesols.create_diffrax_solver(ode,
+    # ode_solver, us_size = odesols.create_diffrax_solver(odeuus_complete,
     #                                                     control_delay=0,
     #                                                     meastimestep=meastimestep,
     #                                                     rtol=1e-6, atol=1e-6,

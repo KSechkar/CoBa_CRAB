@@ -38,7 +38,7 @@ def create_diffrax_solver(odeuus_complete,
     stepsize_controller = PIDController(rtol=rtol, atol=atol)
 
     # define ODE solver
-    ode_solver = lambda t0, x0, us0, args: run_diffrax(
+    ode_solver = lambda t0, x0, u0, us0, args: run_diffrax(
         odeuus_complete=odeuus_complete,
         term=term,
         solver=solver,

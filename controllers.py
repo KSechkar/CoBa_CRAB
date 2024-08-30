@@ -4,8 +4,8 @@ CONTROLLERS.PY: Describing different cybergenetic controllers for the synthetic 
 
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
+import jax
 import jax.numpy as jnp
-import jax.lax as lax
 import numpy as np
 
 # CONSTANT CHEMICAL INPUT ----------------------------------------------------------------------------------------------
@@ -67,17 +67,20 @@ def cci_initialise():
 # control action
 def cci_action(t,x, # simulation time, system state
                ctrl_memo, # controller memory
+               ref, # currently tracked reference
                par, # system parameters
                modules_name2pos, # genetic module name to position decoder
                controller_name2pos # controller name to position decoder
                ):
     # constant inducer concentration
-    u=x[controller_name2pos['inducer_level']]
+    u=ref
     return u
 
 # ode
 def cci_ode(F_calc,     # calculating the transcription regulation functions
             t,  x,  # time, cell state
+            ctrl_memo, # controller memory
+            ref, # currently tracked reference
             e, l, # translation elongation rate, growth rate
             R, # ribosome count in the cell, resource
             k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator
@@ -90,7 +93,8 @@ def cci_ode(F_calc,     # calculating the transcription regulation functions
 
 #  update controller memory based on measurements
 def cci_update(t, x, # time, cell state
-               ctrl_memo, # controller memory
+               ctrl_memo,  # controller memory
+               ref,  # currently tracked reference
                par, # system parameters
                modules_name2pos, # genetic module name to position decoder
                controller_name2pos # controller name to position decoder

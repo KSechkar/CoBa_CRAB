@@ -20,6 +20,7 @@ import time
 # CIRCUIT AND EXTERNAL INPUT IMPORTS -----------------------------------------------------------------------------------
 import genetic_modules as gms
 import controllers as ctrls
+import reference_switchers as refsws
 
 
 # CELL MODEL FUNCTIONS -------------------------------------------------------------------------------------------------
@@ -208,6 +209,21 @@ class CellModelAuxiliary:
                 modules_name2pos, modules_styles,
                 controller_name2pos, controller_styles,
                 module1_v_with_F_calc, module2_v_with_F_calc)
+    
+    # add reference tracker to the cell model
+    def add_reference_switcher(self,
+                              cellmodel_par, # cell model parameters
+                              reference_switcher_initialiser, # function initialising the reference tracker
+                              reference_switcher_switcher # function switching to next reference when it is time to do so
+                              ):
+        # call initialiser
+        reference_switcher_par = reference_switcher_initialiser()
+        
+        # update cell model parameters
+        cellmodel_par.update(reference_switcher_par)
+        
+        # return
+        return (cellmodel_par, reference_switcher_switcher)
 
     # package synthetic gene parameters into jax arrays for calculating k values
     def synth_gene_params_for_jax(self, par,  # system parameters
@@ -619,7 +635,8 @@ class CellModelAuxiliary:
         return mRNA_figure, protein_figure, misc_figure
 
     # plot transcription regulation function values for the circuit's genes
-    def plot_circuit_regulation(self, ts, xs, ctrl_memorecord, # time points and state vectors
+    def plot_circuit_regulation(self, ts, xs,   # time points and state vectors
+                                ctrl_memorecord, refrecord, # controller memory and reference tracker records
                                 module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
                                 controller_action, # control action calculator
                                 par, # model parameters
@@ -638,7 +655,7 @@ class CellModelAuxiliary:
         module2_miscs = synth_miscs_total_and_each[2]
 
         # get control action values
-        us=self.get_u(ts,xs,ctrl_memorecord,
+        us=self.get_u(ts,xs,ctrl_memorecord, refrecord,
               controller_action,
               par, modules_name2pos, controller_name2pos)
 
@@ -686,7 +703,8 @@ class CellModelAuxiliary:
         return F_figure
 
     # plot controller states and actions over time
-    def plot_controller(self, ts, xs, ctrl_memorecord, # time points and state vectors
+    def plot_controller(self, ts, xs, # time points and state vectors
+                        ctrl_memorecord, refrecord, # controller memory and reference tracker records
                         memos, dynvars, # controller memo and dynamic variable names
                         controller_action, controller_update, # control action calculator and controller state update
                         par, # model parameters
@@ -696,13 +714,35 @@ class CellModelAuxiliary:
                         dimensions=(320, 180), tspan=None):
 
         # get control action values
-        us=self.get_u(ts,xs,ctrl_memorecord,
+        us=self.get_u(ts,xs,ctrl_memorecord,refrecord,
                 controller_action,
                 par, modules_name2pos, controller_name2pos)
 
         # set default time span if unspecified
         if(tspan==None):
             tspan=(ts[0], ts[-1])
+
+        # tracked reference figure
+        # create a ColumnDataSource object for the plot
+        data_for_column = {'t': ts}
+        data_for_column['ref'] = refrecord
+        source = bkmodels.ColumnDataSource(data=data_for_column)
+
+        ref_fig = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="t, hours",
+            y_axis_label="Reference values",
+            x_range=tspan,
+            title='Reference tracker',
+            tools="box_zoom,pan,hover,reset"
+        )
+        ref_fig.line(x='t', y='ref', source=source, line_width=1.5, line_color='red', legend_label='ref')
+        # legend formatting
+        ref_fig.legend.label_text_font_size = "8pt"
+        ref_fig.legend.location = "top_right"
+        ref_fig.legend.click_policy = 'hide'
+
 
         # memory entry figure
         if (len(memos) == 0):
@@ -780,7 +820,7 @@ class CellModelAuxiliary:
         u_fig.legend.location = "top_right"
         u_fig.legend.click_policy = 'hide'
 
-        return memo_fig, dynvar_fig, u_fig
+        return ref_fig, memo_fig, dynvar_fig, u_fig
 
 
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
@@ -973,13 +1013,14 @@ class CellModelAuxiliary:
 
     # find control inputs
     def get_u(self, t, x,
-              ctrl_memo, 
+              ctrl_memo,
+              ref,
               controller_action,
               par, 
               modules_name2pos, controller_name2pos):
         u = np.zeros(len(t))
         for i in range(0, len(t)):
-            u[i] = controller_action(t[i], x[i, :], ctrl_memo[i], par, modules_name2pos, controller_name2pos)
+            u[i] = controller_action(t[i], x[i, :], ctrl_memo[i], ref[i], par, modules_name2pos, controller_name2pos)
         return u
 
 
@@ -999,8 +1040,9 @@ def ode(t, x, # simulation time and state vector
     kplus_het, kminus_het, n_het, d_het = args[
         5]  # unpack jax-arrayed synthetic gene parameters for calculating k values
 
-    # get the controller memory
+    # get the controller memory and currently tracked reference
     ctrl_memo = args[6]
+    ref = args[7]
 
     # give the state vector entries meaningful names
     m_a = x[0]  # metabolic gene mRNA
@@ -1060,7 +1102,7 @@ def ode(t, x, # simulation time and state vector
     psi = psi_calc(par, T)  # tRNA synthesis rate - AMENDED
 
     # CONTROL ACTION CALCULATION
-    u = controller_action(t,x,ctrl_memo,par,modules_name2pos,controller_name2pos)
+    u = controller_action(t,x,ctrl_memo,ref,par,modules_name2pos,controller_name2pos)
 
     # GENETIC MODULE ODE CALCULATION
     module1_ode_value = module1_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
@@ -1094,7 +1136,7 @@ def ode(t, x, # simulation time and state vector
                     module1_ode_value[num_synth_genes1*2:] + module2_ode_value[num_synth_genes2*2:]
                     +
                     # add controller ODEs
-                    controller_ode(t, x, e, l, R, k_het, D, p_prot, par, modules_name2pos, controller_name2pos)
+                    controller_ode(t, x, ctrl_memo, ref, e, l, R, k_het, D, p_prot, par, modules_name2pos, controller_name2pos)
                      )
     return dxdt
 
@@ -1109,7 +1151,9 @@ def ode_sim_loop(par,  # dictionary with model parameters
             modules_name2pos, controller_name2pos, # variable name to position in the state vector decoders
             sgp4j, # some synthetic gene parameters in jax.array form - for efficient simulation
             tf,  # simulation time frame
-            meastimestep   # output measurement time window
+            meastimestep,   # output measurement time window
+            refs,  # reference values for the controller
+            ref_switcher,  # reference switcher
             ):
     # define the arguments for finding the next state vector
     args = (par,
@@ -1125,7 +1169,8 @@ def ode_sim_loop(par,  # dictionary with model parameters
                                                   meastimestep,
                                                   args,
                                                   ode_solver,
-                                                  controller_update)
+                                                  controller_update,
+                                                  jnp.array(refs), ref_switcher)
 
     # define the jac.lax.scan function
     ode_scan = lambda sim_state_rec0, ts: jax.lax.scan(scan_step, sim_state_rec0, ts)
@@ -1134,6 +1179,7 @@ def ode_sim_loop(par,  # dictionary with model parameters
     # initalise the simulator state: (t, x, sim_step_cntr, record_step_cntr, key, tf, xs)
     sim_state0 = {'t': tf[0], 'x': x0,  # time, state vector
                   'ctrl_memo': jnp.array(ctrl_memo0),  # controller memory (jnp array format)
+                  'i_ref': 0, 't_last_ref_switch': 0.0, # index of the currently tracked reference, time refernce was switched last
                   'tf': tf  # overall simulation time frame
                   }
 
@@ -1144,16 +1190,19 @@ def ode_sim_loop(par,  # dictionary with model parameters
     t= sim_outcome[0]
     xs = sim_outcome[1]
     ctrl_memorecord = sim_outcome[2]
+    refrecord = sim_outcome[3]
 
     # return the simulation outcomes
-    return t, xs, ctrl_memorecord
+    return t, xs, ctrl_memorecord, refrecord
 
 # one step of the ode simulation loop (from one measurement to the next)
 def ode_sim_step(sim_state, t,
                  meastimestep,
                  args,
                  ode_solver,
-                 controller_update):
+                 controller_update,
+                 refs, ref_switcher
+                 ):
 
     # get next measurement time
     next_t = sim_state['t'] + meastimestep
@@ -1161,21 +1210,32 @@ def ode_sim_step(sim_state, t,
     # simulate the ODE until the next measurement
     next_x = ode_solver(tf=(t, next_t),
                         x0=sim_state['x'],
-                        args=args+(sim_state['ctrl_memo'],))
+                        # extra ODE arguments, including the controller memory and the currently tracked reference
+                        args=args+(sim_state['ctrl_memo'],refs[sim_state['i_ref']]))
 
     # update the controller memory
     # par= args[0]
     # modules_name2pos = args[1]
     # controller_name2pos = args[2]
-    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], args[0], args[1], args[2])
+    next_ctrl_memo = controller_update(t, next_x, sim_state['ctrl_memo'], refs[sim_state['i_ref']], args[0], args[1], args[2])
+
+    # check if it is time to switch the reference
+    next_i_ref, next_t_last_ref_switch = ref_switcher(sim_state['i_ref'],  # current reference index
+                                                      refs,  # list of references
+                                                      sim_state['t_last_ref_switch'],  # time of last reference switch
+                                                      sim_state['t'], sim_state['x'],
+                                                      sim_state['ctrl_memo'],
+                                                      args[0], args[1], args[2])
 
     # update the overall simulation state
-    next_sim_state = {'t': t+meastimestep,
+    next_sim_state = {'t': t + meastimestep,
                       'x': next_x,
                       'ctrl_memo': next_ctrl_memo,
+                      'i_ref': next_i_ref,
+                      't_last_ref_switch': next_t_last_ref_switch,
                       'tf': sim_state['tf']}
 
-    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'])
+    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'],refs[sim_state['i_ref']])
 
 
 # ODE SOLVER INITIALISERS ----------------------------------------------------------------------------------------------
@@ -1210,32 +1270,38 @@ def main():
     cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
     cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
     init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
+    
+    # add reference tracker switcher
+    cellmodel_par_with_refswitch, ref_switcher = cellmodel_auxil.add_reference_switcher(cellmodel_par,   # cell model parameters
+                                                                                   refsws.timed_switching_initialise,    # function initialising the reference switcher
+                                                                                   refsws.timed_switching_switch   # function switching the references to be tracked
+                                                                                   )
 
     # load synthetic genetic modules and the controller
     ode, \
-    module1_F_calc, module2_F_calc, controller_action, controller_update, \
-    par, init_conds, controller_memo0, \
-    synth_genes_total_and_each, synth_miscs_total_and_each, \
-    controller_memos, controller_dynvars, \
-    modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
-    module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
-        # module 1
-        gms.constfp_initialise,  # function initialising the circuit
-        gms.constfp_ode,  # function defining the circuit ODEs
-        gms.constfp_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # module 2
-        gms.cicc_initialise,  # function initialising the circuit
-        gms.cicc_ode,  # function defining the circuit ODEs
-        gms.cicc_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # controller
-        ctrls.cci_initialise,  # function initialising the controller
-        ctrls.cci_action,  # function calculating the controller action
-        ctrls.cci_ode,  # function defining the controller ODEs
-        ctrls.cci_update,  # function updating the controller based on measurements
-        # cell model parameters and initial conditions
-        cellmodel_par, init_conds)
+        module1_F_calc, module2_F_calc, controller_action, controller_update, \
+        par, init_conds, controller_memo0, \
+        synth_genes_total_and_each, synth_miscs_total_and_each, \
+        controller_memos, controller_dynvars, \
+        modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
+        module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
+            # module 1
+            gms.constfp_initialise,  # function initialising the circuit
+            gms.constfp_ode,  # function defining the circuit ODEs
+            gms.constfp_F_calc,
+            # function calculating the circuit genes' transcription regulation functions
+            # module 2
+            gms.cicc_initialise,  # function initialising the circuit
+            gms.cicc_ode,  # function defining the circuit ODEs
+            gms.cicc_F_calc,
+            # function calculating the circuit genes' transcription regulation functions
+            # controller
+            ctrls.cci_initialise,  # function initialising the controller
+            ctrls.cci_action,  # function calculating the controller action
+            ctrls.cci_ode,  # function defining the controller ODEs
+            ctrls.cci_update,  # function updating the controller based on measurements
+            # cell model parameters and initial conditions
+            cellmodel_par_with_refswitch, init_conds)
 
     # unpack the synthetic genes and miscellaneous species lists
     synth_genes= synth_genes_total_and_each[0]
@@ -1251,10 +1317,14 @@ def main():
     par['a_ofp']=1000
     par['c_b']=100
     par['a_b']=1000
+    
+    # SET CONTROLLER REFERENCES
+    refs=[0,10.0,20.0,30.0]
+    par['t_switch_ref']=5.0
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
-    tf = (0, 20)  # simulation time frame
+    tf = (0.0, 20.0)  # simulation time frame
 
     # measurement time step
     meastimestep = 0.1  # hours
@@ -1266,7 +1336,8 @@ def main():
 
     # solve ODE
     timer= time.time()
-    ts_jnp, xs_jnp, ctrl_memorecord_jnp = ode_sim_loop(par,
+    ts_jnp, xs_jnp,\
+        ctrl_memorecord_jnp, refrecord_jnp = ode_sim_loop(par,
                                                   ode_solver,
                                                   controller_update, controller_action,
                                                   cellmodel_auxil.x0_from_init_conds(init_conds,
@@ -1279,13 +1350,15 @@ def main():
                                                   (len(synth_miscs), len(module1_miscs), len(module2_miscs)), # number of miscellaneous species
                                                   modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
                                                   cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes), # synthetic gene parameters in jax.array form
-                                                  tf, meastimestep,  # simulation time frame and measurement time step
+                                                  tf, meastimestep, # simulation time frame and measurement time step
+                                                  refs, ref_switcher # reference values and reference switcher
                                                   )
 
     # convert simulation results to numpy arrays
     ts = np.array(ts_jnp)
     xs = np.array(xs_jnp)
     ctrl_memorecord = np.array(ctrl_memorecord_jnp)
+    refrecord= np.array(refrecord_jnp)
 
     print('Simulation time: ', time.time()-timer, ' s')
     
@@ -1318,7 +1391,8 @@ def main():
                                                                               modules_name2pos,
                                                                               modules_styles)  # plot simulation results
     # plot synthetic circuit regulation functions
-    F_fig = cellmodel_auxil.plot_circuit_regulation(ts, xs, ctrl_memorecord, # time points and state vectors
+    F_fig = cellmodel_auxil.plot_circuit_regulation(ts, xs, # time points and state vectors
+                                                    ctrl_memorecord, refrecord, # controller memory and reference values
                                                     module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
                                                     controller_action, # control action calculator
                                                     par, # model parameters
@@ -1328,7 +1402,7 @@ def main():
                                                     controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                                                     modules_styles)  # plot simulation results
     # plot controller memory, dynamic variables and actions
-    ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs, ctrl_memorecord,
+    ctrl_ref_fig, ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs, ctrl_memorecord, refrecord,
                                                                                  controller_memos, controller_dynvars,
                                                                                  controller_action, controller_update,
                                                                                  par,
@@ -1337,7 +1411,7 @@ def main():
 
     # save the plots
     bkplot.save(bklayouts.grid([[mRNA_fig, prot_fig, misc_fig],
-                                [F_fig, None, None],
+                                [F_fig, None, ctrl_ref_fig],
                                 [ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig]]))
     
     return

@@ -5,8 +5,8 @@ for the Python/Jax implementation of the coarse-grained resource-aware E.coli mo
 
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
+import jax
 import jax.numpy as jnp
-import jax.lax as lax
 import numpy as np
 
 # NO SYNTHETIC GENES ---------------------------------------------------------------------------------------------------

@@ -11,7 +11,6 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import functools
-from diffrax import diffeqsolve, Kvaerno3, Heun, ODETerm, SaveAt, PIDController, SteadyStateEvent
 import pandas as pd
 from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts
 
@@ -21,6 +20,7 @@ import time
 import genetic_modules as gms
 import controllers as ctrls
 import reference_switchers as refsws
+import ode_solvers as odesols
 
 
 # CELL MODEL FUNCTIONS -------------------------------------------------------------------------------------------------
@@ -192,11 +192,10 @@ class CellModelAuxiliary:
             module2_v_with_F_calc = None
 
         # add the geetic module and controller ODEs (as well as control action calculator) to that of the host cell model
-        cellmodel_ode = lambda t, x, args: ode(t, x,
-                                         # ctrl_memo,
-                                         module1_ode_with_F_calc, module2_ode_with_F_calc,
-                                         controller_ode, controller_action,
-                                         args)
+        cellmodel_ode = lambda t, x, us, args: odeuus(t, x, us,
+                                                     module1_ode_with_F_calc, module2_ode_with_F_calc,
+                                                     controller_ode, controller_action,
+                                                     args)
 
         # return updated ode and parameter, initial conditions, circuit gene (and miscellaneous specie) names
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
@@ -636,7 +635,8 @@ class CellModelAuxiliary:
 
     # plot transcription regulation function values for the circuit's genes
     def plot_circuit_regulation(self, ts, xs,   # time points and state vectors
-                                ctrl_memorecord, refrecord, # controller memory and reference tracker records
+                                ctrl_memorecord, uexprecord, # controller memory and experienced control actions records
+                                refrecord, # reference tracker records
                                 module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
                                 controller_action, # control action calculator
                                 par, # model parameters
@@ -654,11 +654,6 @@ class CellModelAuxiliary:
         module1_miscs = synth_miscs_total_and_each[1]
         module2_miscs = synth_miscs_total_and_each[2]
 
-        # get control action values
-        us=self.get_u(ts,xs,ctrl_memorecord, refrecord,
-              controller_action,
-              par, modules_name2pos, controller_name2pos)
-
         # if no circuitry, return no plots
         if (len(synth_genes) == 0):
             return None
@@ -671,8 +666,8 @@ class CellModelAuxiliary:
         Fs1 = np.zeros((len(ts), len(module1_genes)))  # initialise
         Fs2 = np.zeros((len(ts), len(module2_genes)))  # initialise
         for i in range(0, len(ts)):
-            Fs1[i, :] = np.array(module1_F_calc(ts[i], xs[i, :], us[i], par, modules_name2pos)[:])
-            Fs2[i, :] = np.array(module2_F_calc(ts[i], xs[i, :], us[i], par, modules_name2pos)[:])
+            Fs1[i, :] = np.array(module1_F_calc(ts[i], xs[i, :], uexprecord[i], par, modules_name2pos)[:])
+            Fs2[i, :] = np.array(module2_F_calc(ts[i], xs[i, :], uexprecord[i], par, modules_name2pos)[:])
 
         # Create ColumnDataSource object for the plot
         data_for_column = {'t': ts}  # initialise with time axis
@@ -704,19 +699,21 @@ class CellModelAuxiliary:
 
     # plot controller states and actions over time
     def plot_controller(self, ts, xs, # time points and state vectors
-                        ctrl_memorecord, refrecord, # controller memory and reference tracker records
+                        ctrl_memorecord, uexprecord,  # controller memory and experienced control actions records
+                        refrecord,  # reference tracker records
                         memos, dynvars, # controller memo and dynamic variable names
                         controller_action, controller_update, # control action calculator and controller state update
                         par, # model parameters
                         modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
                         controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                         controller_styles, # colours for the controller plots
+                        u0, control_delay,  # initial control action and size of control action record needed to account for the delay
                         dimensions=(320, 180), tspan=None):
 
-        # get control action values
-        us=self.get_u(ts,xs,ctrl_memorecord,refrecord,
-                controller_action,
-                par, modules_name2pos, controller_name2pos)
+        # get calculated control action values
+        us_calc = self.get_u_calc(ts, xs, ctrl_memorecord, refrecord,
+                                               controller_action,
+                                               par, modules_name2pos, controller_name2pos)
 
         # set default time span if unspecified
         if(tspan==None):
@@ -734,10 +731,10 @@ class CellModelAuxiliary:
             x_axis_label="t, hours",
             y_axis_label="Reference values",
             x_range=tspan,
-            title='Reference tracker',
+            title='Reference values',
             tools="box_zoom,pan,hover,reset"
         )
-        ref_fig.line(x='t', y='ref', source=source, line_width=1.5, line_color='red', legend_label='ref')
+        ref_fig.line(x='t', y='ref', source=source, line_width=1.5, line_color='black', legend_label='ref')
         # legend formatting
         ref_fig.legend.label_text_font_size = "8pt"
         ref_fig.legend.location = "top_right"
@@ -814,7 +811,8 @@ class CellModelAuxiliary:
             title='Controller action',
             tools="box_zoom,pan,hover,reset"
         )
-        u_fig.line(x=ts, y=us, line_width=1.5, line_color='blue', legend_label='u') # plot control action
+        u_fig.line(x=ts, y=us_calc, line_width=1.5, line_color='blue', legend_label='u (calculated)')  # plot calculated control actions
+        u_fig.line(x=ts, y=uexprecord, line_width=1.5, line_color='red', legend_label='u (experienced)')  # plot experienced control actions
         # legend formatting
         u_fig.legend.label_text_font_size = "8pt"
         u_fig.legend.location = "top_right"
@@ -1011,26 +1009,31 @@ class CellModelAuxiliary:
 
         return e, l, F_r, nu, jnp.multiply(psi, l), T, D
 
-    # find control inputs
-    def get_u(self, t, x,
-              ctrl_memo,
-              ref,
-              controller_action,
-              par, 
-              modules_name2pos, controller_name2pos):
-        u = np.zeros(len(t))
+    # find calculated control inputs
+    def get_u_calc(self, t, x,
+                   ctrl_memo,
+                   ref,
+                   controller_action,
+                   par,
+                   modules_name2pos, controller_name2pos,
+                   ):
+        # get calculated control actions
+        u_calc = np.zeros(len(t))
         for i in range(0, len(t)):
-            u[i] = controller_action(t[i], x[i, :], ctrl_memo[i], ref[i], par, modules_name2pos, controller_name2pos)
-        return u
+            u_calc[i] = controller_action(t[i], x[i, :], ctrl_memo[i], ref[i], par,
+                                          modules_name2pos, controller_name2pos)
+
+            # return calculated and experienced control actions
+        return u_calc
 
 
 # DETERMINISTIC SIMULATION ---------------------------------------------------------------------------------------------
 # ode
-def ode(t, x, # simulation time and state vector
-        #ctrl_memo, # controller memory
-        module1_ode, module2_ode, # ODEs for the genetic modules
-        controller_ode, controller_action, # ODE and control action calculation for the controller
-        args):
+def odeuus(t, x, # simulation time and state vector
+          us, # control action record - from the one calclated control_delay hours ago to the latest calculated control action
+          module1_ode, module2_ode,  # ODEs for the genetic modules
+          controller_ode, controller_action,  # ODE and control action calculation for the controller
+          args):
     # unpack the args
     par = args[0]  # model parameters
     modules_name2pos = args[1]  # gene name - position in circuit vector decoder
@@ -1074,9 +1077,6 @@ def ode(t, x, # simulation time and state vector
 
     H = (par['K_D'] + h) / par['K_D']  # corection to ribosome availability due to chloramphenicol action
 
-
-    m_het_div_k_het = jnp.sum(x[8:8 + num_synth_genes] / k_het)
-
     # heterologous mRNA levels scaled by RBS strength
     m_het_div_k_het = jnp.sum(x[8:8 + num_synth_genes] / k_het)
 
@@ -1102,7 +1102,9 @@ def ode(t, x, # simulation time and state vector
     psi = psi_calc(par, T)  # tRNA synthesis rate - AMENDED
 
     # CONTROL ACTION CALCULATION
-    u = controller_action(t,x,ctrl_memo,ref,par,modules_name2pos,controller_name2pos)
+    u_calculated = controller_action(t,x,ctrl_memo,ref,par,modules_name2pos,controller_name2pos)
+    us_with_latest_calculated=jnp.append(us,u_calculated) # add the latest calculated control action to the record
+    u=us_with_latest_calculated[0]  # exerting control action calculated control_delay hours ago
 
     # GENETIC MODULE ODE CALCULATION
     module1_ode_value = module1_ode(t, x, u, e, l, R, k_het, D, p_prot, par, modules_name2pos)
@@ -1138,22 +1140,27 @@ def ode(t, x, # simulation time and state vector
                     # add controller ODEs
                     controller_ode(t, x, ctrl_memo, ref, e, l, R, k_het, D, p_prot, par, modules_name2pos, controller_name2pos)
                      )
-    return dxdt
+    # return the ODE value, experienced control action and the updated control actions record (but without the oldest calculated control action)
+    return (dxdt, u, us_with_latest_calculated[1:])
 
 # ode simulation loop
-def ode_sim_loop(par,  # dictionary with model parameters
-            ode_solver,  # ODE function for the cell with the synthetic gene circuit
+def ode_sim(par,  # dictionary with model parameters
+            ode_solver,  # ODE solver for the cell with the synthetic gene circuit
+            odeuus_complete,  # ODE function for the cell with the synthetic gene circuit and the controller (also gives calculated and experienced control actions)
             controller_update,  # function for updating the controller memory
             controller_action,  # function for calculating the control action
             x0,  # initial condition VECTOR
             ctrl_memo0,  # initial controller memory
+            u0, # initial control action, applied before any measurement-informed actions reach the system
             num_synth_genes, num_synth_miscs, # number of synthetic genes and miscellaneous species in the circuit
             modules_name2pos, controller_name2pos, # variable name to position in the state vector decoders
             sgp4j, # some synthetic gene parameters in jax.array form - for efficient simulation
             tf,  # simulation time frame
             meastimestep,   # output measurement time window
+            control_delay,  # control action delay before the calculated action reaches the system
+            us_size,  # size of the control action record needed
             refs,  # reference values for the controller
-            ref_switcher,  # reference switcher
+            ref_switcher  # reference switcher
             ):
     # define the arguments for finding the next state vector
     args = (par,
@@ -1163,6 +1170,20 @@ def ode_sim_loop(par,  # dictionary with model parameters
 
     # time points at which we save the solution
     ts = jnp.arange(tf[0], tf[1] + meastimestep / 2, meastimestep)
+
+    # get the first experienced control action
+    if(control_delay>0):
+        u_exp0 = u0 # if control delay is present, the initial control action is the one experienced by the system
+    else:
+        # if no control delay, the initial control action is the one calculated at the initial time point
+        u_exp0 = odeuus_complete(ts[0], x0,  # simulation time and state vector
+                                 jnp.array([]),  # control action record - empty as zero control delay
+                                 args + (ctrl_memo0, refs[0])
+                                 # extra ODE arguments, including the controller memory and the currently tracked reference
+                                 )[1]
+
+    # initialise the calculated control actions record
+    us0=jnp.array([u0]*us_size)
 
     # make the retrieval of next simulator state a lambda-function for jax.lax.scanning
     scan_step = lambda sim_state, t: ode_sim_step(sim_state, t,
@@ -1180,7 +1201,9 @@ def ode_sim_loop(par,  # dictionary with model parameters
     sim_state0 = {'t': tf[0], 'x': x0,  # time, state vector
                   'ctrl_memo': jnp.array(ctrl_memo0),  # controller memory (jnp array format)
                   'i_ref': 0, 't_last_ref_switch': 0.0, # index of the currently tracked reference, time refernce was switched last
-                  'tf': tf  # overall simulation time frame
+                  'tf': tf,  # overall simulation time frame
+                  'u': u_exp0,  # control action experienced by the system
+                  'us': us0  # control actions record (needed if control delay present)
                   }
 
     # run the simulation
@@ -1190,10 +1213,11 @@ def ode_sim_loop(par,  # dictionary with model parameters
     t= sim_outcome[0]
     xs = sim_outcome[1]
     ctrl_memorecord = sim_outcome[2]
-    refrecord = sim_outcome[3]
+    urecord = sim_outcome[3]
+    refrecord = sim_outcome[4]
 
     # return the simulation outcomes
-    return t, xs, ctrl_memorecord, refrecord
+    return t, xs, ctrl_memorecord, urecord, refrecord
 
 # one step of the ode simulation loop (from one measurement to the next)
 def ode_sim_step(sim_state, t,
@@ -1201,17 +1225,20 @@ def ode_sim_step(sim_state, t,
                  args,
                  ode_solver,
                  controller_update,
-                 refs, ref_switcher
+                 refs, ref_switcher,
                  ):
 
     # get next measurement time
     next_t = sim_state['t'] + meastimestep
 
     # simulate the ODE until the next measurement
-    next_x = ode_solver(tf=(t, next_t),
-                        x0=sim_state['x'],
-                        # extra ODE arguments, including the controller memory and the currently tracked reference
-                        args=args+(sim_state['ctrl_memo'],refs[sim_state['i_ref']]))
+    # to get the state vector, experienced control action and the record of calculated control actions
+    next_x, next_u, next_us = ode_solver(t0=t,
+                                 x0=sim_state['x'],
+                                 u0=sim_state['u'],
+                                 us0=sim_state['us'],
+                                 # extra ODE arguments, including the controller memory and the currently tracked reference
+                                 args=args + (sim_state['ctrl_memo'], refs[sim_state['i_ref']]))
 
     # update the controller memory
     # par= args[0]
@@ -1228,37 +1255,17 @@ def ode_sim_step(sim_state, t,
                                                       args[0], args[1], args[2])
 
     # update the overall simulation state
-    next_sim_state = {'t': t + meastimestep,
+    next_sim_state = {'t': next_t,
                       'x': next_x,
                       'ctrl_memo': next_ctrl_memo,
                       'i_ref': next_i_ref,
                       't_last_ref_switch': next_t_last_ref_switch,
-                      'tf': sim_state['tf']}
+                      'tf': sim_state['tf'],
+                      'u': next_u,
+                      'us': next_us}
 
-    return next_sim_state, (t,sim_state['x'],sim_state['ctrl_memo'],refs[sim_state['i_ref']])
+    return next_sim_state, (t, sim_state['x'], sim_state['ctrl_memo'], sim_state['u'], refs[sim_state['i_ref']])
 
-
-# ODE SOLVER INITIALISERS ----------------------------------------------------------------------------------------------
-def diffrax_solver(ode_complete,
-                   rtol, atol,  # relative and absolute integration tolerances
-                   solver=Kvaerno3()  # ODE solver
-                   ):
-    # define ODE term
-    vector_field = lambda t, y, args: ode_complete(t, y, args)
-    term = ODETerm(vector_field)
-
-    # define the time points at which we save the solution
-    stepsize_controller = PIDController(rtol=rtol, atol=atol)
-
-    # define ODE solver
-    ode_solver = lambda tf, x0, args: diffeqsolve(
-                    term,
-                    solver,
-                    args=args,
-                    t0=tf[0], t1=tf[1], dt0=0.1, y0=x0,
-                    max_steps=None,
-                    stepsize_controller=stepsize_controller).ys[-1]
-    return ode_solver
 
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
 def main():
@@ -1278,7 +1285,7 @@ def main():
                                                                                    )
 
     # load synthetic genetic modules and the controller
-    ode, \
+    odeuus_complete, \
         module1_F_calc, module2_F_calc, controller_action, controller_update, \
         par, init_conds, controller_memo0, \
         synth_genes_total_and_each, synth_miscs_total_and_each, \
@@ -1296,10 +1303,10 @@ def main():
             gms.cicc_F_calc,
             # function calculating the circuit genes' transcription regulation functions
             # controller
-            ctrls.cci_initialise,  # function initialising the controller
-            ctrls.cci_action,  # function calculating the controller action
-            ctrls.cci_ode,  # function defining the controller ODEs
-            ctrls.cci_update,  # function updating the controller based on measurements
+            ctrls.ciref_initialise,  # function initialising the controller
+            ctrls.ciref_action,  # function calculating the controller action
+            ctrls.ciref_ode,  # function defining the controller ODEs
+            ctrls.ciref_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
             cellmodel_par_with_refswitch, init_conds)
 
@@ -1313,14 +1320,23 @@ def main():
 
     # SET PARAMETERS
     # set the parameters for the synthetic genes
-    par['c_ofp']=100
+    par['c_ofp']=10
     par['a_ofp']=1000
+    par['c_ta']=100
+    par['a_ta']=10
     par['c_b']=100
-    par['a_b']=1000
+    par['a_b']=2000
+
+    # controller
+    init_conds['inducer_level']=1000.0
+
+    # SET CONTROLLER DELAY
+    control_delay=0.0
+    u0=0.0
     
     # SET CONTROLLER REFERENCES
-    refs=[0,10.0,20.0,30.0]
-    par['t_switch_ref']=5.0
+    refs=[0.0,1000.0]
+    par['t_switch_ref']=10.0
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
@@ -1330,34 +1346,46 @@ def main():
     meastimestep = 0.1  # hours
 
     # choose ODE solver
-    ode_solver = diffrax_solver(ode,
-                                rtol=1e-6, atol=1e-6,
-                                solver=Kvaerno3())
+    # ode_solver, us_size = odesols.create_diffrax_solver(ode,
+    #                                                     control_delay=0,
+    #                                                     meastimestep=meastimestep,
+    #                                                     rtol=1e-6, atol=1e-6,
+    #                                                     solver_spec='Kvaerno3')
+    ode_solver, us_size = odesols.create_euler_solver(odeuus_complete,
+                                                      control_delay=control_delay,
+                                                      meastimestep=meastimestep,
+                                                      euler_timestep=1e-5)
 
     # solve ODE
     timer= time.time()
     ts_jnp, xs_jnp,\
-        ctrl_memorecord_jnp, refrecord_jnp = ode_sim_loop(par,
-                                                  ode_solver,
-                                                  controller_update, controller_action,
-                                                  cellmodel_auxil.x0_from_init_conds(init_conds,
-                                                                                     par,
-                                                                                     synth_genes, synth_miscs, controller_dynvars,
-                                                                                     modules_name2pos,
-                                                                                     controller_name2pos),
-                                                  controller_memo0,  # initial controller memory record
-                                                  (len(synth_genes), len(module1_genes), len(module2_genes)), # number of synthetic genes
-                                                  (len(synth_miscs), len(module1_miscs), len(module2_miscs)), # number of miscellaneous species
-                                                  modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
-                                                  cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes), # synthetic gene parameters in jax.array form
-                                                  tf, meastimestep, # simulation time frame and measurement time step
-                                                  refs, ref_switcher # reference values and reference switcher
-                                                  )
+        ctrl_memorecord_jnp, uexprecord_jnp, \
+        refrecord_jnp  = ode_sim(par,   # model parameters
+                                 ode_solver,    # ODE solver for the cell with the synthetic gene circuit
+                                 odeuus_complete,    # ODE function for the cell with the synthetic gene circuit and the controller (also gives calculated and experienced control actions)
+                                 controller_update, controller_action,   # function for updating the controller memory and calculating the control action
+                                 cellmodel_auxil.x0_from_init_conds(init_conds,
+                                                                    par,
+                                                                    synth_genes, synth_miscs, controller_dynvars,
+                                                                    modules_name2pos,
+                                                                    controller_name2pos),   # initial condition VECTOR
+                                 controller_memo0,  # initial controller memory record
+                                 u0,    # initial control action, applied before any measurement-informed actions reach the system
+                                 (len(synth_genes), len(module1_genes), len(module2_genes)),    # number of synthetic genes
+                                 (len(synth_miscs), len(module1_miscs), len(module2_miscs)),    # number of miscellaneous species
+                                 modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
+                                 cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes),   # synthetic gene parameters in jax.array form
+                                 tf, meastimestep,  # simulation time frame and measurement time step
+                                 control_delay,  # delay before control action reaches the system
+                                 us_size,  # size of the control action record needed
+                                 refs, ref_switcher,  # reference values and reference switcher
+                                 )
 
     # convert simulation results to numpy arrays
     ts = np.array(ts_jnp)
     xs = np.array(xs_jnp)
     ctrl_memorecord = np.array(ctrl_memorecord_jnp)
+    uexprecord = np.array(uexprecord_jnp)
     refrecord= np.array(refrecord_jnp)
 
     print('Simulation time: ', time.time()-timer, ' s')
@@ -1392,7 +1420,8 @@ def main():
                                                                               modules_styles)  # plot simulation results
     # plot synthetic circuit regulation functions
     F_fig = cellmodel_auxil.plot_circuit_regulation(ts, xs, # time points and state vectors
-                                                    ctrl_memorecord, refrecord, # controller memory and reference values
+                                                    ctrl_memorecord, uexprecord,    # controller memory and experienced control actions records
+                                                    refrecord,  # reference tracker records
                                                     module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
                                                     controller_action, # control action calculator
                                                     par, # model parameters
@@ -1402,12 +1431,15 @@ def main():
                                                     controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                                                     modules_styles)  # plot simulation results
     # plot controller memory, dynamic variables and actions
-    ctrl_ref_fig, ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs, ctrl_memorecord, refrecord,
-                                                                                 controller_memos, controller_dynvars,
-                                                                                 controller_action, controller_update,
-                                                                                 par,
-                                                                                 modules_name2pos, controller_name2pos,
-                                                                                 controller_styles)
+    ctrl_ref_fig, ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs,
+                                                                                            ctrl_memorecord, uexprecord, # controller memory and experienced control actions records
+                                                                                            refrecord, # reference tracker records
+                                                                                            controller_memos, controller_dynvars,
+                                                                                            controller_action, controller_update,
+                                                                                            par,
+                                                                                            modules_name2pos, controller_name2pos,
+                                                                                            controller_styles,
+                                                                                            u0, control_delay)
 
     # save the plots
     bkplot.save(bklayouts.grid([[mRNA_fig, prot_fig, misc_fig],

@@ -73,7 +73,7 @@ def timed_switching_switch(i_ref,  # current reference index
                            controller_name2pos  # controller name to position decoder
                            ):
     # -------- DEFINE SPECIFIC SWITCHING CONDITIONS FROM HERE...
-    condition = (t >= t_last_ref_switch+par['t_switch_ref'])
+    condition = (t - par['t_switch_ref'] >= t_last_ref_switch)
     # -------- ...TO HERE
 
     return jax.lax.cond(condition, switch, no_switch,

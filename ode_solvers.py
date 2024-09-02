@@ -38,7 +38,7 @@ def create_diffrax_solver(odeuus_complete,
     stepsize_controller = PIDController(rtol=rtol, atol=atol)
 
     # define ODE solver
-    ode_solver = lambda t0, x0, u0, us0, args: run_diffrax(
+    ode_solver=lambda t0, x0, us0, args: run_diffrax(
         odeuus_complete=odeuus_complete,
         term=term,
         solver=solver,
@@ -68,14 +68,11 @@ def run_diffrax(odeuus_complete,  # complete ODE and control action calculation 
                     max_steps=None,
                     stepsize_controller=stepsize_controller).ys[-1]
     
-    # get next experienced (as well as calculated, since there is no control action delay) control action
-    next_u=odeuus_complete(t0+meastimestep, next_x, jnp.array([]), args)[1]
-    
     # no calculated control actions recorded since there is no control action delay
     next_us = jnp.array([])
     
     # return
-    return (next_x, next_u, next_us)
+    return (next_x, next_us)
 
 
 # EULER SOLVER (SUPPORTS CONTROL ACTION DELAY) -------------------------------------------------------------------------
@@ -92,28 +89,27 @@ def create_euler_solver(odeuus_complete,  # complete ODE function
     us_size = int((control_delay+euler_timestep/2) / euler_timestep)
 
     # define the Euler step as a function of step counter and (t, x, us, args) only
-    euler_step_txuusargs = lambda step_cntr, euler_state, args: euler_step(step_cntr, odeuus_complete, euler_timestep, euler_state, args)
+    euler_step_txusargs = lambda step_cntr, euler_state, args: euler_step(step_cntr, odeuus_complete, euler_timestep, euler_state, args)
 
     # define the Euler loop as a function of (t0, x0, us0, args) only
-    run_euler_txuus = lambda t0, x0, u0, us0, args: run_euler(euler_step_txuusargs, euler_steps_in_meastimestep, t0, x0, u0, us0, args)
+    run_euler_txus = lambda t0, x0, us0, args: run_euler(euler_step_txusargs, euler_steps_in_meastimestep, t0, x0, us0, args)
 
-    return (run_euler_txuus, # return the Euler loop function
+    return (run_euler_txus, # return the Euler loop function
             us_size)    # return the required control action memory size
 
 
 # auxiliary: Euler integration loop, returning next state and control actions record
-def run_euler(euler_step_txuusargs,  # Euler step function
+def run_euler(euler_step_txusargs,  # Euler step function
                   euler_steps_in_meastimestep,  # number of Euler steps in the measurement time step
-                  t0, x0, u0, us0, args  # initial time, state vector, control actions record, and arguments
+                  t0, x0, us0, args  # initial time, state vector, control actions record, and arguments
                   ):
-    next_txuus = jax.lax.fori_loop(0, euler_steps_in_meastimestep,  # loop over Euler steps
-                                      lambda step_cntr, euler_state: euler_step_txuusargs(step_cntr, euler_state, args),  # Euler step function
-                                      {'t': t0, 'x': x0, 'u': u0, 'us': us0}  # initial condition and arguments
+    next_txus = jax.lax.fori_loop(0, euler_steps_in_meastimestep,  # loop over Euler steps
+                                      lambda step_cntr, euler_state: euler_step_txusargs(step_cntr, euler_state, args),  # Euler step function
+                               {'t': t0, 'x': x0, 'us': us0}  # initial condition and arguments
                                       )
     # return
-    return (next_txuus['x'],    # next state vector
-            next_txuus['u'],    # next experienced control action
-            next_txuus['us'])   # record of calculated control actions
+    return (next_txus['x'],    # next state vector
+            next_txus['us'])   # record of calculated control actions
 
 
 # auxiliary: Euler step function
@@ -139,4 +135,4 @@ def euler_step(step_cntr,  # step counter (needed to run the fori_loop)
     # get the next time
     t_next = t + euler_timestep
 
-    return {'t': t_next, 'x': x_next, 'u':u_next, 'us': us_next}  # return the next time, state vector, control actions record, and arguments
+    return {'t': t_next, 'x': x_next, 'us': us_next}  # return the next time, state vector, control actions record, and arguments

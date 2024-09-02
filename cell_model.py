@@ -1171,17 +1171,6 @@ def ode_sim(par,  # dictionary with model parameters
     # time points at which we save the solution
     ts = jnp.arange(tf[0], tf[1] + meastimestep / 2, meastimestep)
 
-    # get the first experienced control action
-    if(control_delay>0):
-        u_exp0 = u0 # if control delay is present, the initial control action is the one experienced by the system
-    else:
-        # if no control delay, the initial control action is the one calculated at the initial time point
-        u_exp0 = odeuus_complete(ts[0], x0,  # simulation time and state vector
-                                 jnp.array([]),  # control action record - empty as zero control delay
-                                 args + (ctrl_memo0, refs[0])
-                                 # extra ODE arguments, including the controller memory and the currently tracked reference
-                                 )[1]
-
     # initialise the calculated control actions record
     us0=jnp.array([u0]*us_size)
 
@@ -1190,6 +1179,7 @@ def ode_sim(par,  # dictionary with model parameters
                                                   meastimestep,
                                                   args,
                                                   ode_solver,
+                                                  odeuus_complete,
                                                   controller_update,
                                                   jnp.array(refs), ref_switcher)
 
@@ -1202,7 +1192,6 @@ def ode_sim(par,  # dictionary with model parameters
                   'ctrl_memo': jnp.array(ctrl_memo0),  # controller memory (jnp array format)
                   'i_ref': 0, 't_last_ref_switch': 0.0, # index of the currently tracked reference, time refernce was switched last
                   'tf': tf,  # overall simulation time frame
-                  'u': u_exp0,  # control action experienced by the system
                   'us': us0  # control actions record (needed if control delay present)
                   }
 
@@ -1224,18 +1213,24 @@ def ode_sim_step(sim_state, t,
                  meastimestep,
                  args,
                  ode_solver,
+                 odeuus_complete,
                  controller_update,
                  refs, ref_switcher,
                  ):
+    # get the input experienced at this time step
+    u_exp = odeuus_complete(t, sim_state['x'],  # simulation time and state vector
+                                 sim_state['us'],  # control action record - empty as zero control delay
+                                 args + (sim_state['ctrl_memo'], refs[sim_state['i_ref']])   # extra ODE arguments, including the controller memory and the currently tracked reference
+                                 )[1]
+
 
     # get next measurement time
     next_t = sim_state['t'] + meastimestep
 
     # simulate the ODE until the next measurement
     # to get the state vector, experienced control action and the record of calculated control actions
-    next_x, next_u, next_us = ode_solver(t0=t,
+    next_x, next_us=ode_solver(t0=t,
                                  x0=sim_state['x'],
-                                 u0=sim_state['u'],
                                  us0=sim_state['us'],
                                  # extra ODE arguments, including the controller memory and the currently tracked reference
                                  args=args + (sim_state['ctrl_memo'], refs[sim_state['i_ref']]))
@@ -1262,10 +1257,9 @@ def ode_sim_step(sim_state, t,
                       'i_ref': next_i_ref,
                       't_last_ref_switch': next_t_last_ref_switch,
                       'tf': sim_state['tf'],
-                      'u': next_u,
                       'us': next_us}
 
-    return next_sim_state, (t, sim_state['x'], sim_state['ctrl_memo'], sim_state['u'], refs[sim_state['i_ref']])
+    return next_sim_state, (t, sim_state['x'], sim_state['ctrl_memo'], u_exp, refs[sim_state['i_ref']])
 
 
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
@@ -1332,7 +1326,7 @@ def main():
     init_conds['inducer_level']=1000.0
 
     # SET CONTROLLER DELAY
-    control_delay=0.0
+    control_delay=0.1
     u0=0.0
     
     # SET CONTROLLER REFERENCES

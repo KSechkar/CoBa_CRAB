@@ -829,6 +829,54 @@ class CellModelAuxiliary:
         return ref_fig, memo_fig, dynvar_fig, u_fig
 
 
+    # plot the control action vs the controlled variable trajectory
+    def plot_control_action_vs_controlled_var(self, ts, xs, # time points and state vectors
+                        ctrl_memorecord, uexprecord,  # controller memory and experienced control actions records
+                        refrecord,  # reference tracker records
+                        refs,  # reference tracker records
+                        memos, dynvars, # controller memo and dynamic variable names
+                        ctrled_var, # name of the variable read and steered by the controller
+                        controller_action, controller_update, # control action calculator and controller state update
+                        par, # model parameters
+                        modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
+                        controller_name2pos, # dictionary mapping controller species to their positions in the state vector
+                        controller_styles, # colours for the controller plots
+                        u0, control_delay,  # initial control action and size of control action record needed to account for the delay
+                        dimensions=(320, 180), tspan=None):
+        # get controlled variable values
+        x_ctrl = xs[:, modules_name2pos[ctrled_var]]
+
+        # get calculated control action values
+        us_calc = self.get_u_calc(ts, xs, ctrl_memorecord, refrecord,
+                                  controller_action,
+                                  par,
+                                  modules_name2pos, controller_name2pos,
+                                  ctrled_var)
+
+        # set default time span if unspecified
+        if (tspan == None):
+            tspan = (ts[0], ts[-1])
+
+        # PLOT
+        u_vs_var_fig = bkplot.figure(
+            frame_width=dimensions[0],
+            frame_height=dimensions[1],
+            x_axis_label="u, control action",
+            y_axis_label=ctrled_var+", controlled variable",
+            x_range=(min(us_calc), max(us_calc)),
+            y_range=(min(refs), max(refs)),
+            title='Control action vs controlled variable',
+            tools="box_zoom,pan,hover,reset"
+        )
+        u_vs_var_fig.line(x=us_calc, y=x_ctrl, line_width=1.5, line_color='blue', legend_label='u calculated')
+        u_vs_var_fig.line(x=us_calc, y=x_ctrl, line_width=1.5, line_color='red', legend_label='u experienced')
+        # legend formatting
+        u_vs_var_fig.legend.label_text_font_size = "8pt"
+        u_vs_var_fig.legend.location = "top_right"
+        u_vs_var_fig.legend.click_policy = 'hide'
+
+        return u_vs_var_fig
+
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
     def plot_phys_variables(self, ts, xs,
                             par, synth_genes, synth_miscs, modules_name2pos,
@@ -941,6 +989,7 @@ class CellModelAuxiliary:
         D_figure.legend.click_policy = 'hide'
 
         return l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure
+
 
     # find values of different cellular variables
     def get_e_l_Fr_nu_psi_T_D(self, t, x,
@@ -1314,10 +1363,10 @@ def main():
             gms.cicc_F_calc,
             # function calculating the circuit genes' transcription regulation functions
             # controller
-            ctrls.bangbangchem_initialise,  # function initialising the controller
-            ctrls.bangbangchem_action,  # function calculating the controller action
-            ctrls.bangbangchem_ode,  # function defining the controller ODEs
-            ctrls.bangbangchem_update,  # function updating the controller based on measurements
+            ctrls.pichem_initialise,  # function initialising the controller
+            ctrls.pichem_action,  # function calculating the controller action
+            ctrls.pichem_ode,  # function defining the controller ODEs
+            ctrls.pichem_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
             cellmodel_par_with_refswitch, init_conds)
 
@@ -1342,15 +1391,20 @@ def main():
     init_conds['inducer_level']=1000.0
 
     # SET CONTROLLER PARAMETERS
-    controller_ctrledvar='p_b' # variable read and steered by the controller
-    refs=[1e5, 2e5] # reference values
-    par['t_switch_ref']=10.0    # time of reference switch
+    controller_ctrledvar='p_ofp' # variable read and steered by the controller
+    points_in_space=10
+    refs=np.linspace(2.2e4, 2e4, points_in_space) # reference values
+    par['t_switch_ref']=20/points_in_space    # time of reference switch
 
-    control_delay=0.1   # control action delay
+    control_delay=0   # control action delay
     u0=0.0  # initial control action
 
     # inducer level when the bang-bang input is ON
-    par['inducer_level_on']=1e3
+    # par['inducer_level_on']=1e3
+    # par['on_when_below_ref']=False
+
+    par['Kp']=-1
+    par['Ki']=0
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
@@ -1456,11 +1510,22 @@ def main():
                                                                                             modules_name2pos, controller_name2pos,
                                                                                             controller_styles,
                                                                                             u0, control_delay)
-
+    # control action vs controlled variable figur
+    u_vs_ctrledvar_fig = cellmodel_auxil.plot_control_action_vs_controlled_var(ts, xs,
+                                                             ctrl_memorecord, uexprecord, # controller memory and experienced control actions records
+                                                             refrecord, # reference tracker records
+                                                             refs,
+                                                             controller_memos, controller_dynvars,
+                                                             controller_ctrledvar,
+                                                             controller_action, controller_update,
+                                                             par,
+                                                             modules_name2pos, controller_name2pos,
+                                                             controller_styles,
+                                                             u0, control_delay)
     # save the plots
     bkplot.save(bklayouts.grid([[mRNA_fig, prot_fig, misc_fig],
                                 [F_fig, None, ctrl_ref_fig],
-                                [ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig]]))
+                                [ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig, u_vs_ctrledvar_fig]]))
     
     return
 

@@ -245,6 +245,7 @@ def bangbangchem_initialise():
 
     # -------- DEFAULT VALUES OF CONTROLLER PARAMETERS/INITIAL CONDITIONS CAN BE SPECIFIED FROM HERE...
     default_par['inducer_level_on'] = 1e3  # inducer concentration (nM) when the input is ON, aka 1
+    default_par['on_when_below_ref'] = True  # ON when the reference is greater than the current value - set to False for OFF in this case
 
     # -------- ...TO HERE
 
@@ -281,8 +282,8 @@ def bangbangchem_action(t, x,  # simulation time, system state
     # value of the controlled variable
     x_ctrled = x[modules_name2pos[ctrled_var]]
 
-    # calculate input to the system - 0 if the reference is higher than the current value, otherwise the inducer level
-    u = par['inducer_level_on'] * (ref > x_ctrled)
+    # calculate input to the system
+    u = par['inducer_level_on'] * ((ref > x_ctrled) * par['on_when_below_ref'] + (ref < x_ctrled) * (not par['on_when_below_ref']))
 
     # return input
     return u

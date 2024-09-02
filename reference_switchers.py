@@ -44,6 +44,7 @@ def no_switching_switch(i_ref,  # current reference index
                         par,  # system parameters
                         modules_name2pos,  # genetic module name to position decoder
                         controller_name2pos,  # controller name to position decoder
+                        ctrledvar,  # name of the variable read and steered by the controller
                         meastimestep  # measurement time step
                         ):
     i_next = i_ref  # no switching
@@ -72,6 +73,7 @@ def timed_switching_switch(i_ref,  # current reference index
                            par,  # system parameters
                            modules_name2pos,  # genetic module name to position decoder
                            controller_name2pos,  # controller name to position decoder
+                           ctrledvar,  # name of the variable read and steered by the controller
                            meastimestep  # measurement time step
                            ):
     # -------- DEFINE SPECIFIC SWITCHING CONDITIONS FROM HERE...

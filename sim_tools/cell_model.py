@@ -17,10 +17,10 @@ from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts
 import time
 
 # CIRCUIT AND EXTERNAL INPUT IMPORTS -----------------------------------------------------------------------------------
-import genetic_modules as gms
-import controllers as ctrls
-import reference_switchers as refsws
-import ode_solvers as odesols
+# import genetic_modules as gms
+# import controllers as ctrls
+# import reference_switchers as refsws
+# import ode_solvers as odesols
 
 
 # CELL MODEL FUNCTIONS -------------------------------------------------------------------------------------------------

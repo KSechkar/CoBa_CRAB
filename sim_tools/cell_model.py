@@ -296,6 +296,11 @@ class CellModelAuxiliary:
         params['nu_max'] = 4.0469e3  # max tRNA amioacylation rate (/h)
         params['K_nu'] = 1.2397e3  # tRNA charging rate Michaelis-Menten constant (nM)
         params['K_e'] = 1.2397e3  # translation elongation rate Michaelis-Menten constant (nM)
+
+        # CAT AND SYNTHETIC PROTEASE PARAMETERS
+        # these genes may not be present, but these parameters are required to handle some calculations correctly
+        params['n_cat'] = 300.0  # protein length (aa)
+        params['n_prot'] = 300.0  # protein length (aa)
         return params
 
     # set default initial conditions
@@ -1453,7 +1458,7 @@ def main():
     # convert simulation results to numpy arrays
     ts = np.array(ts_jnp)
     xs = np.array(xs_jnp)
-    ctrl_memorecord = np.array(ctrl_memorecord_jnp)
+    ctrl_memorecord = np.array(ctrl_memorecord_jnp).T
     uexprecord = np.array(uexprecord_jnp)
     refrecord= np.array(refrecord_jnp)
 

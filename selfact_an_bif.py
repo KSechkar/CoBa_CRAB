@@ -130,6 +130,14 @@ def pswitch_inflexion_in_Freal(par):
     return ((par['eta_switch'] - 1) / (par['eta_switch'] + 1)) ** (1 / par['eta_switch']) * (
                 par['K_switch'] / par['I_switch'])
 
+# FINDING THE STEADY STATES: PARAMETRIC APPROACH -----------------------------------------------------------------------
+# difference of Freal and Freq for a given p_switch value
+def diff_from_pswitch(pswitch, q_osynth, par, cellvars):
+    # get the F values
+    F_real = F_real_calc(pswitch, par)
+    F_req = F_req_calc(pswitch, q_osynth, par, cellvars)
+    return F_real - F_req
+
 
 # DETERMINING SEARCH INTERVAL BOUNDARIES -------------------------------------------------------------------------------
 # find the maximum possible value of p_switch
@@ -443,6 +451,116 @@ def main():
     print(q_osynth_bif_Freqbelow, q_osynth_bif_Freqabove)
 
     # Note to self: negative q_osynth values possible - they just mean that native gene expression burden is already too high to achieve this bifurcation!
+
+    # find analtyical equilibria of the system
+    q_osynth_range=np.linspace(0, 1, 20)
+
+    bifurcation_curve_q_osynth = []
+    bifurcation_curve_p_switch = []
+    # get high-expression equilibria for q_osynth values where they are possible
+    for q_osynth in q_osynth_range:
+        # check if the high-expression equilibrium is possible
+        if(q_osynth<q_osynth_bif_Freqabove):
+            # at high-expression equilibiria, p_switch is above the touch-above bifurcation value
+            hieq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                             lower=p_switch_bif_Freqabove, upper=p_switch_sup,
+                                             maxiter=10000, tol=1e-18,
+                                             check_bracket=False)  # required for vmapping and jitting
+            p_switch_hieq = hieq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+
+            # record the high-expression equilibrium
+            bifurcation_curve_q_osynth.append(q_osynth)
+            bifurcation_curve_p_switch.append(p_switch_hieq)
+    # add the touch-above bifurcation point
+    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqabove))
+    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqabove))
+    # get the saddle point for q_osynth values where they are possible
+    for q_osynth in np.flip(q_osynth_range):    # range flipped for continuity of the curve
+        # check if the saddle point is possible
+        if(q_osynth>q_osynth_bif_Freqbelow and q_osynth<q_osynth_bif_Freqabove):
+            # at saddle points, p_switch is below the touch-below bifurcation value
+            sp_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                             lower=p_switch_bif_Freqbelow, upper=p_switch_bif_Freqabove,
+                                             maxiter=10000, tol=1e-18,
+                                             check_bracket=False)
+            p_switch_sp = sp_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+            bifurcation_curve_q_osynth.append(q_osynth)
+            bifurcation_curve_p_switch.append(p_switch_sp)
+    # add the touch-above bifurcation point
+    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqbelow))
+    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqbelow))
+    # get the low-expression equilibria for q_osynth values where they are possible
+    for q_osynth in q_osynth_range: # range NOT flipped for continuity of the curve
+        # check if the low-expression equilibrium is possible
+        if(q_osynth>q_osynth_bif_Freqbelow):
+            # at low-expression equilibiria, p_switch is below the touch-below bifurcation value
+            leeq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                             lower=0, upper=p_switch_bif_Freqbelow,
+                                             maxiter=10000, tol=1e-18,
+                                             check_bracket=False)
+            p_switch_leeq = leeq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+            # record the low-expression equilibrium
+            bifurcation_curve_q_osynth.append(q_osynth)
+            bifurcation_curve_p_switch.append(p_switch_leeq)
+
+    # plot the bifurcation curve
+    bkplot.output_file('bifurcation_curve.html')
+    bif_fig = bkplot.figure(
+        frame_width=480,
+        frame_height=360,
+        x_axis_label="q_p, probe burden",
+        y_axis_label="p_switch, switch protein level",
+        x_range=(min(q_osynth_range), max(q_osynth_range)),
+        y_range=(0, p_switch_sup),
+        title='Analytical bifurcation curve for self-activating switch',
+        tools="box_zoom,pan,hover,reset"
+    )
+    # plot the controlled variable vs control action
+    bif_fig.line(x=np.array(bifurcation_curve_q_osynth),
+                 y=np.array(bifurcation_curve_p_switch),
+                 line_width=1.5, line_color='black',
+                 legend_label='true steady states')
+    bif_fig.scatter(x=np.array(bifurcation_curve_q_osynth),
+                    y=np.array(bifurcation_curve_p_switch),
+                    marker='circle', size=5,
+                    color='black', legend_label='true steady states')
+    # legend formatting
+    bif_fig.legend.label_text_font_size = "8pt"
+    bif_fig.legend.location = "top_right"
+    bif_fig.legend.click_policy = 'hide'
+
+    # plot the real and required F_switch values at touch-below bifurcation
+    p_switch_range = np.linspace(0, p_switch_sup, 100)
+    F_real_range = F_real_calc(p_switch_range, par)
+    F_req_range = F_req_calc(p_switch_range, q_osynth_bif_Freqabove, par, cellvars)
+    touch_fig = bkplot.figure(
+        frame_width=480,
+        frame_height=360,
+        x_axis_label="p_switch, switch protein level",
+        y_axis_label="F",
+        x_range=(0, p_switch_sup),
+        y_range=(0, 1),
+        title='F vs p_switch',
+        tools="box_zoom,pan,hover,reset"
+    )
+    # plot the controlled variable vs control action
+    touch_fig.line(x=p_switch_range,
+                   y=F_real_range,
+                   line_width=1.5, line_color='black',
+                   legend_label='F_real')
+    touch_fig.line(x=p_switch_range,
+                     y=F_req_range,
+                     line_width=1.5, line_color='red',
+                     legend_label='F_req')
+    # legend formatting
+    touch_fig.legend.label_text_font_size = "8pt"
+    touch_fig.legend.location = "top_right"
+    touch_fig.legend.click_policy = 'hide'
+
+
+    # show plot
+    bkplot.save(bklayouts.column(bif_fig, touch_fig))
+
 
     return
 

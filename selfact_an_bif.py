@@ -14,6 +14,7 @@ import pickle
 from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts, palettes as bkpalettes, transform as bktransform
 from math import pi
 import time
+import scipy
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
 from sim_tools.cell_model import *
@@ -137,6 +138,10 @@ def diff_from_pswitch(pswitch, q_osynth, par, cellvars):
     F_real = F_real_calc(pswitch, par)
     F_req = F_req_calc(pswitch, q_osynth, par, cellvars)
     return F_real - F_req
+
+# square of the difference of Freal and Freq for a given p_switch value
+def sqdiff_from_pswitch(pswitch, q_osynth, par, cellvars):
+    return diff_from_pswitch(pswitch, q_osynth, par, cellvars)**2
 
 
 # DETERMINING SEARCH INTERVAL BOUNDARIES -------------------------------------------------------------------------------
@@ -396,8 +401,9 @@ def main():
     # self-activating switch
     par['c_switch'] = 100.0
     par['a_switch'] = 1500.0
-    par['K_switch'] = 2500.0
-    par['I_switch'] = 0.02
+    par['K_switch'] = 250.0
+    par['I_switch'] = 0.2
+    par['k+_switch'] = par['k+_ofp']/100
 
     # chemically cybercontrolled probe
     par['c_ta'] = 100.0
@@ -418,90 +424,30 @@ def main():
     print(chis)
 
     # FIND BIFURCATION THRESHOLDS
+    q_osynth_range = np.linspace(0, 2*cellvars['q_sas_max'], 100)   # consider burdens from other synthetic genes for up to twice the own burden
+
+    # find equilibria for every q_osynth value (to the nearest integer p_switch concentration)
     p_switch_sup=find_p_switch_sup(par, cellvars)  # upper bound for p_switch
-    pswitch_inflexion = pswitch_inflexion_in_Freal(par)  # inflexion point in real F_switch)
-    F_min = par['baseline_switch']  # lower bound of feasible region for F (corresponds to p_switch=0)
-    F_max = F_real_calc(p_switch_sup, par)  # upper bound of feasible region for F
-    F_inflexion = F_real_calc(pswitch_inflexion, par)  # inflexion point in real F_switch
-
-    # find the bifurcation with F_req touching F_real from below
-    Freqbelow_bif_problem = jaxopt.Bisection(optimality_fun=gradiff_from_F,
-                                         lower=F_min, upper=F_inflexion,
-                                         maxiter=10000, tol=1e-18,
-                                         check_bracket=False)  # required for vmapping and jitting
-    F_bif_Freqbelow = Freqbelow_bif_problem.run(par=par, cellvars=cellvars).params  # F_switch value at the bifurcation
-    p_switch_bif_Freqbelow= pswitch_from_F(F_bif_Freqbelow, par)   # p_switch value at the bifurcation
-    q_osynth_bif_Freqbelow = q_osynth_from_F_and_pswitch(F_bif_Freqbelow,
-                                                         p_switch_bif_Freqbelow,
-                                                         par, cellvars)    # q_osynth value enabling the bifurcation
-
-    # find the bifurcation with F_req touching F_real from above
-    Freqabove_bif_problem = jaxopt.Bisection(optimality_fun=gradiff_from_F,
-                                         lower=F_inflexion, upper=F_max,
-                                         maxiter=10000, tol=1e-18,
-                                         check_bracket=False)  # required for vmapping and jitting
-    F_bif_Freqabove = Freqabove_bif_problem.run(par=par, cellvars=cellvars).params  # F_switch value at the bifurcation
-    p_switch_bif_Freqabove= pswitch_from_F(F_bif_Freqabove, par)   # p_switch value at the bifurcation
-    q_osynth_bif_Freqabove = q_osynth_from_F_and_pswitch(F_bif_Freqabove,
-                                                         p_switch_bif_Freqabove,
-                                                         par, cellvars)    # q_osynth value enabling the bifurcation
-
-    print(F_bif_Freqbelow, F_bif_Freqabove)
-    print(p_switch_bif_Freqbelow, p_switch_bif_Freqabove)
-    print(q_osynth_bif_Freqbelow, q_osynth_bif_Freqabove)
-
-    # Note to self: negative q_osynth values possible - they just mean that native gene expression burden is already too high to achieve this bifurcation!
-
-    # find analtyical equilibria of the system
-    q_osynth_range=np.linspace(0, 1, 20)
-
-    bifurcation_curve_q_osynth = []
-    bifurcation_curve_p_switch = []
-    # get high-expression equilibria for q_osynth values where they are possible
+    p_switch_range=np.arange(0.0,p_switch_sup+1,1.0)  # range of p_switch values to evaluate
+    bifurcation_curve_q_osynth=[]
+    bifurcation_curve_p_switch=[]
     for q_osynth in q_osynth_range:
-        # check if the high-expression equilibrium is possible
-        if(q_osynth<q_osynth_bif_Freqabove):
-            # at high-expression equilibiria, p_switch is above the touch-above bifurcation value
-            hieq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=p_switch_bif_Freqabove, upper=p_switch_sup,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)  # required for vmapping and jitting
-            p_switch_hieq = hieq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+        # get squared differences between real and required F values for every p_switch value
+        sqdiff_for_pswitch=functools.partial(sqdiff_from_pswitch, q_osynth=q_osynth, par=par, cellvars=cellvars)
+        sqdiffs=sqdiff_for_pswitch(p_switch_range)
 
-            # record the high-expression equilibrium
+        # roots are approximated by the points where the squared difference is lower than around it
+        sqdiff_leq_than_prev=np.concatenate(([False],sqdiffs[1:]<=sqdiffs[:-1]))
+        sqdiff_leq_than_next=np.concatenate((sqdiffs[:-1]<=sqdiffs[1:], [False]))
+        sqdiff_close_to_zero=sqdiffs<1e-3
+        approx_minima = np.where(np.logical_and(np.logical_and(sqdiff_leq_than_prev, sqdiff_leq_than_next),
+                                                sqdiff_close_to_zero
+                                                ))[0]
+
+        # record the bifurcation points
+        for minima in approx_minima:
             bifurcation_curve_q_osynth.append(q_osynth)
-            bifurcation_curve_p_switch.append(p_switch_hieq)
-    # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqabove))
-    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqabove))
-    # get the saddle point for q_osynth values where they are possible
-    for q_osynth in np.flip(q_osynth_range):    # range flipped for continuity of the curve
-        # check if the saddle point is possible
-        if(q_osynth>q_osynth_bif_Freqbelow and q_osynth<q_osynth_bif_Freqabove):
-            # at saddle points, p_switch is below the touch-below bifurcation value
-            sp_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=p_switch_bif_Freqbelow, upper=p_switch_bif_Freqabove,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)
-            p_switch_sp = sp_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
-            bifurcation_curve_q_osynth.append(q_osynth)
-            bifurcation_curve_p_switch.append(p_switch_sp)
-    # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqbelow))
-    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqbelow))
-    # get the low-expression equilibria for q_osynth values where they are possible
-    for q_osynth in q_osynth_range: # range NOT flipped for continuity of the curve
-        # check if the low-expression equilibrium is possible
-        if(q_osynth>q_osynth_bif_Freqbelow):
-            # at low-expression equilibiria, p_switch is below the touch-below bifurcation value
-            leeq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=0, upper=p_switch_bif_Freqbelow,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)
-            p_switch_leeq = leeq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
-            # record the low-expression equilibrium
-            bifurcation_curve_q_osynth.append(q_osynth)
-            bifurcation_curve_p_switch.append(p_switch_leeq)
+            bifurcation_curve_p_switch.append(p_switch_range[minima])
 
     # plot the bifurcation curve
     bkplot.output_file('bifurcation_curve.html')
@@ -516,10 +462,10 @@ def main():
         tools="box_zoom,pan,hover,reset"
     )
     # plot the controlled variable vs control action
-    bif_fig.line(x=np.array(bifurcation_curve_q_osynth),
-                 y=np.array(bifurcation_curve_p_switch),
-                 line_width=1.5, line_color='black',
-                 legend_label='true steady states')
+    # bif_fig.line(x=np.array(bifurcation_curve_q_osynth),
+    #              y=np.array(bifurcation_curve_p_switch),
+    #              line_width=1.5, line_color='black',
+    #              legend_label='true steady states')
     bif_fig.scatter(x=np.array(bifurcation_curve_q_osynth),
                     y=np.array(bifurcation_curve_p_switch),
                     marker='circle', size=5,
@@ -530,9 +476,9 @@ def main():
     bif_fig.legend.click_policy = 'hide'
 
     # plot the real and required F_switch values at touch-below bifurcation
-    p_switch_range = np.linspace(0, p_switch_sup, 100)
+    # p_switch_range = np.linspace(0, p_switch_sup, 100)
     F_real_range = F_real_calc(p_switch_range, par)
-    F_req_range = F_req_calc(p_switch_range, q_osynth_bif_Freqabove, par, cellvars)
+    F_req_range = F_req_calc(p_switch_range, 0.4, par, cellvars)
     touch_fig = bkplot.figure(
         frame_width=480,
         frame_height=360,

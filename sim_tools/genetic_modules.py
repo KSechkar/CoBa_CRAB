@@ -54,6 +54,10 @@ def nocircuit_v(F_calc,     # calculating the transcription regulation functions
     return []
 
 
+# effective mRNA concentrations for genes expressed from the same operon with some others
+def nocircuit_eff_mRNA(x, par, name2pos):
+    return jnp.array([])
+
 
 # CONSTITUTIVELY EXPRESSED FLUORESCENT PROTEIN -------------------------------------------------------------------------
 # initialise all the necessary parameters to simulate the circuit
@@ -163,6 +167,10 @@ def constfp_ode(F_calc,     # calculating the transcription regulation functions
             (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']]
     ]
 
+# effective mRNA concentrations for genes expressed from the same operon with some others
+def constfp_eff_mRNA(x, par, name2pos):
+    return jnp.array([x[name2pos['m_ofp']]]) # no co-expression
+
 
 # SELF-ACTIVATING BISTABLE SWITCH --------------------------------------------------------------------------------------
 # initialise all the necessary parameters to simulate the circuit
@@ -247,6 +255,8 @@ def sas_initialise():
         circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
 
     # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    circuit_styles['colours']['switch']='#48d1ccff'
+    circuit_styles['colours']['ofp']='#bb3385ff'
     # -------- ...TO HERE
 
     return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
@@ -280,7 +290,8 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
     F = F_calc(t, x, u, par, name2pos)
 
     # ofp reporter co-expressed from the same operon as the switch => same mRNA conc., up to scaling for multiple-ribosome translation
-    m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
+    # commented out as NOW TREATED USING SAS_EFF_MRNA FUNCTION!
+    # m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
 
     # RETURN THE ODE
     return [# mRNAs
@@ -288,9 +299,13 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
             0,  # ofp co-expressed with the switch
             # proteins
             (e / par['n_switch']) * (x[name2pos['m_switch']] / k_het[name2pos['k_switch']] / D) * R - (l + par['d_switch']*p_prot) * x[name2pos['p_switch']],
-            (e / par['n_ofp']) * (m_ofp / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']],
+            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']],
     ]
 
+# effective mRNA concentrations for genes expressed from the same operon with some others
+def sas_eff_mRNA(x, par, name2pos):
+    m_ofp = x[name2pos['m_switch']] * par['n_ofp'] / par['n_switch']
+    return jnp.array([x[name2pos['m_switch']], m_ofp]) # ofp co-expressed with the switch gene
 
 # CHEMICALLY INDUCED, CYBERCONTROLLED GENE [tau-leap compatible, includes a synthetic protease]-------------------------
 def cicc_initialise():
@@ -412,3 +427,7 @@ def cicc_ode(F_calc,     # calculating the transcription regulation functions
             (e / par['n_ta']) * (x[name2pos['m_ta']] / k_het[name2pos['k_ta']] / D) * R - (l + par['d_ta']*p_prot) * x[name2pos['p_ta']],
             (e / par['n_b']) * (x[name2pos['m_b']] / k_het[name2pos['k_b']] / D) * R - (l + par['d_b']*p_prot) * x[name2pos['p_b']],
     ]
+
+# effective mRNA concentrations for genes expressed from the same operon with some others
+def cicc_eff_mRNA(x, par, name2pos):
+    return jnp.array([x[name2pos['m_ta']], x[name2pos['m_b']]]) # no co-expression

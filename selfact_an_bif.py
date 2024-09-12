@@ -74,7 +74,7 @@ def dFreq_dpswitch_calc(p_switch,   # switch protein level
     return a_coeff * b_coeff / (b_coeff - p_switch) ** 2
 
 
-# FINDING THE BIFURCATIONS: PARAMETRIC APPROACH ------------------------------------------------------------------------
+# FINDING THE BIFURCATIONS: AUXILIARIES FOR THE PARAMETRIC APPROACH ----------------------------------------------------
 # difference of gradients at the fixed point for a given value of F_switch
 def gradiff_from_F(F,   # value of F_switch
                    par,     # system parameters
@@ -130,7 +130,7 @@ def pswitch_inflexion_in_Freal(par):
     return ((par['eta_switch'] - 1) / (par['eta_switch'] + 1)) ** (1 / par['eta_switch']) * (
                 par['K_switch'] / par['I_switch'])
 
-# FINDING THE STEADY STATES: PARAMETRIC APPROACH -----------------------------------------------------------------------
+# FINDING THE STEADY STATES: AUXILIARIES FOR THE PARAMETRIC APPROACH ---------------------------------------------------
 # difference of Freal and Freq for a given p_switch value
 def diff_from_pswitch(pswitch, q_osynth, par, cellvars):
     # get the F values
@@ -190,29 +190,31 @@ def get_ss_F_and_e(nutr_qual):
 
     # load synthetic genetic modules (self-activating switch + unexpressed const. gene) and the controller (constant irrelevant input)
     odeuus_complete, \
-        module1_F_calc, module2_F_calc, controller_action, controller_update, \
+        module1_F_calc, module2_F_calc, \
+        module1_eff_mRNA, module2_eff_mRNA, \
+        controller_action, controller_update, \
         par, init_conds, controller_memo0, \
         synth_genes_total_and_each, synth_miscs_total_and_each, \
         controller_memos, controller_dynvars, controller_ctrledvar, \
         modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
         module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
-        # module 1
-        gms.sas_initialise,  # function initialising the circuit
-        gms.sas_ode,  # function defining the circuit ODEs
-        gms.sas_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # module 2
-        gms.cicc_initialise,  # function initialising the circuit
-        gms.cicc_ode,  # function defining the circuit ODEs
-        gms.cicc_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # controller
-        ctrls.cci_initialise,  # function initialising the controller
-        ctrls.cci_action,  # function calculating the controller action
-        ctrls.cci_ode,  # function defining the controller ODEs
-        ctrls.cci_update,  # function updating the controller based on measurements
-        # cell model parameters and initial conditions
-        cellmodel_par_with_refswitch, init_conds)
+            # module 1
+            gms.sas_initialise,  # function initialising the circuit
+            gms.sas_ode,  # function defining the circuit ODEs
+            gms.sas_F_calc, # function calculating the circuit genes' transcription regulation functions
+            gms.sas_eff_mRNA,  # function calculating the circuit genes' effective mRNA levels
+            # module 2
+            gms.cicc_initialise,  # function initialising the circuit
+            gms.cicc_ode,  # function defining the circuit ODEs
+            gms.cicc_F_calc,    # function calculating the circuit genes' transcription regulation functions
+            gms.cicc_eff_mRNA,  # function calculating the circuit genes' effective mRNA levels
+            # controller
+            ctrls.cci_initialise,  # function initialising the controller
+            ctrls.cci_action,  # function calculating the controller action
+            ctrls.cci_ode,  # function defining the controller ODEs
+            ctrls.cci_update,  # function updating the controller based on measurements
+            # cell model parameters and initial conditions
+            cellmodel_par_with_refswitch, init_conds)
 
     # unpack the synthetic genes and miscellaneous species lists
     synth_genes = synth_genes_total_and_each[0]
@@ -293,7 +295,10 @@ def get_ss_F_and_e(nutr_qual):
 
     # LOOK AT THE STEADY STATE
     # get steady-state translation elongation rate and ribosomal gene transcription function
-    es, _, F_rs, _, _, _, _ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par, synth_genes, synth_miscs, modules_name2pos)
+    es, _, F_rs, _, _, _, _ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
+                                                                    synth_genes, synth_miscs,
+                                                                    modules_name2pos,
+                                                                    module1_eff_mRNA, module2_eff_mRNA)
     e = es[-1]
     F_r = F_rs[-1]
 
@@ -346,95 +351,12 @@ def find_max_qs_and_chis(
     # return
     return qmaxs, chis
 
-# MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
-def main():
-    # set up jax
-    jax.config.update('jax_platform_name', 'cpu')
-    jax.config.update("jax_enable_x64", True)
-
-    # initialise cell model
-    cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
-    cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
-    init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
-
-    # add reference tracker switcher
-    cellmodel_par_with_refswitch, ref_switcher = cellmodel_auxil.add_reference_switcher(cellmodel_par,
-                                                                                        # cell model parameters
-                                                                                        refsws.no_switching_initialise,
-                                                                                        # function initialising the reference switcher
-                                                                                        refsws.no_switching_switch
-                                                                                        # function switching the references to be tracked
-                                                                                        )
-
-    # load synthetic genetic modules and the controller
-    odeuus_complete, \
-        module1_F_calc, module2_F_calc, controller_action, controller_update, \
-        par, init_conds, controller_memo0, \
-        synth_genes_total_and_each, synth_miscs_total_and_each, \
-        controller_memos, controller_dynvars, controller_ctrledvar, \
-        modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
-        module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
-        # module 1
-        gms.sas_initialise,  # function initialising the circuit
-        gms.sas_ode,  # function defining the circuit ODEs
-        gms.sas_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # module 2
-        gms.cicc_initialise,  # function initialising the circuit
-        gms.cicc_ode,  # function defining the circuit ODEs
-        gms.cicc_F_calc,
-        # function calculating the circuit genes' transcription regulation functions
-        # controller
-        ctrls.cci_initialise,  # function initialising the controller
-        ctrls.cci_action,  # function calculating the controller action
-        ctrls.cci_ode,  # function defining the controller ODEs
-        ctrls.cci_update,  # function updating the controller based on measurements
-        # cell model parameters and initial conditions
-        cellmodel_par_with_refswitch, init_conds)
-
-    # unpack the synthetic genes and miscellaneous species lists
-    synth_genes = synth_genes_total_and_each[0]
-    module1_genes = synth_genes_total_and_each[1]
-    module2_genes = synth_genes_total_and_each[2]
-    synth_miscs = synth_miscs_total_and_each[0]
-    module1_miscs = synth_miscs_total_and_each[1]
-    module2_miscs = synth_miscs_total_and_each[2]
-
-    # find the steady-state cellular variables
-    e_ss, F_r_ss = get_ss_F_and_e(init_conds['s'])
-    qmaxs, chis = find_max_qs_and_chis(e_ss, F_r_ss, par, synth_genes, modules_name2pos)
-
-    # SPECIFY SYNTHETIC GENE PARAMETERS
-    # self-activating switch
-    par['c_switch'] = 100.0
-    par['a_switch'] = 3000.0
-    par['k+_switch'] = par['k+_ofp'] / 100.0
-
-    par['baseline_switch'] = 0.05
-    par['K_switch'] = 250.0
-    par['I_switch'] = 0.1
-
-
-    # chemically cybercontrolled probe
-    par['c_ta'] = 100.0
-    par['a_ta'] = 10.0
-    par['c_b'] = 100.0
-    par['a_b'] = 3000.0
-
-    # GET MAXIMUM BURDENS AND DEGRADATION COEFFICIENTS
-    e_ss, F_r_ss = get_ss_F_and_e(init_conds['s'])
-    qmaxs, chis = find_max_qs_and_chis(e_ss, F_r_ss, par, synth_genes, modules_name2pos)
-    cellvars={}
-    cellvars.update(qmaxs)
-    cellvars.update(chis)
-    # add maxmium overall burden from the self-activating switch
-    cellvars['q_sas_max']=cellvars['q_switch_max']+cellvars['q_ofp_max']
-
-    print(qmaxs)
-    print(chis)
-
-    # FIND BIFURCATION THRESHOLDS
-    p_switch_sup=find_p_switch_sup(par, cellvars)  # upper bound for p_switch
+# FINDING THE BIFURCATIONS ---------------------------------------------------------------------------------------------
+# find the bifurcation points for the self-activating switch
+# for one point, the required F_switch value touches the real F_switch curve from below; for the other, from above
+def find_bifurcations(par, cellvars):
+    # intervals in which to look for the bifurcations
+    p_switch_sup = find_p_switch_sup(par, cellvars)  # upper bound for p_switch
     pswitch_inflexion = pswitch_inflexion_in_Freal(par)  # inflexion point in real F_switch)
     F_min = par['baseline_switch']  # lower bound of feasible region for F (corresponds to p_switch=0)
     F_max = F_real_calc(p_switch_sup, par)  # upper bound of feasible region for F
@@ -442,161 +364,132 @@ def main():
 
     # find the bifurcation with F_req touching F_real from below
     Freqbelow_bif_problem = jaxopt.Bisection(optimality_fun=gradiff_from_F,
-                                         lower=F_min, upper=F_inflexion,
-                                         maxiter=10000, tol=1e-18,
-                                         check_bracket=False)  # required for vmapping and jitting
+                                             lower=F_min, upper=F_inflexion,
+                                             maxiter=10000, tol=1e-18,
+                                             check_bracket=False)  # required for vmapping and jitting
     F_bif_Freqbelow = Freqbelow_bif_problem.run(par=par, cellvars=cellvars).params  # F_switch value at the bifurcation
-    p_switch_bif_Freqbelow= pswitch_from_F(F_bif_Freqbelow, par)   # p_switch value at the bifurcation
-    q_osynth_bif_Freqbelow = q_osynth_from_F_and_pswitch(F_bif_Freqbelow,
-                                                         p_switch_bif_Freqbelow,
-                                                         par, cellvars)    # q_osynth value enabling the bifurcation
 
     # find the bifurcation with F_req touching F_real from above
     Freqabove_bif_problem = jaxopt.Bisection(optimality_fun=gradiff_from_F,
-                                         lower=F_inflexion, upper=F_max,
-                                         maxiter=10000, tol=1e-18,
-                                         check_bracket=False)  # required for vmapping and jitting
+                                             lower=F_inflexion, upper=F_max,
+                                             maxiter=10000, tol=1e-18,
+                                             check_bracket=False)  # required for vmapping and jitting
     F_bif_Freqabove = Freqabove_bif_problem.run(par=par, cellvars=cellvars).params  # F_switch value at the bifurcation
-    p_switch_bif_Freqabove= pswitch_from_F(F_bif_Freqabove, par)   # p_switch value at the bifurcation
+
+    # get associated p_switch, p_ofp, q_sas and q_osynth values
+    # touch-below bifurcation
+    p_switch_bif_Freqbelow = pswitch_from_F(F_bif_Freqbelow, par)  # p_switch value at the bifurcation
+    q_osynth_bif_Freqbelow = q_osynth_from_F_and_pswitch(F_bif_Freqbelow,
+                                                         p_switch_bif_Freqbelow,
+                                                         par, cellvars)  # q_osynth value enabling the bifurcation
+    p_ofp_bif_Freqbelow = p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars)  # p_ofp value at the bifurcation
+    q_sas_bif_Freqbelow = cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqbelow, par)  # q_sas value at the bifurcation
+    # touch-above bifurcation
+    p_switch_bif_Freqabove = pswitch_from_F(F_bif_Freqabove, par)  # p_switch value at the bifurcation
     q_osynth_bif_Freqabove = q_osynth_from_F_and_pswitch(F_bif_Freqabove,
                                                          p_switch_bif_Freqabove,
-                                                         par, cellvars)    # q_osynth value enabling the bifurcation
+                                                         par, cellvars)  # q_osynth value enabling the bifurcation
+    p_ofp_bif_Freqabove = p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars)  # p_ofp value at the bifurcation
+    q_sas_bif_Freqabove = cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqabove, par)  # q_sas value at the bifurcation
 
-    print(F_bif_Freqbelow, F_bif_Freqabove)
-    print(p_switch_bif_Freqbelow, p_switch_bif_Freqabove)
-    print(q_osynth_bif_Freqbelow, q_osynth_bif_Freqabove)
+    # return
+    return (
+        {'F': F_bif_Freqbelow, 'p_switch': p_switch_bif_Freqbelow, 'q_osynth': q_osynth_bif_Freqbelow,
+            'p_ofp': p_ofp_bif_Freqbelow, 'q_sas': q_sas_bif_Freqbelow},
+        {'F': F_bif_Freqabove, 'p_switch': p_switch_bif_Freqabove, 'q_osynth': q_osynth_bif_Freqabove,
+            'p_ofp': p_ofp_bif_Freqabove, 'q_sas': q_sas_bif_Freqabove}
+    )
 
-    # Note to self: negative q_osynth values possible - they just mean that native gene expression burden is already too high to achieve this bifurcation!
 
-    # find analtyical equilibria of the system
-    q_osynth_range=np.linspace(0, 1, 20)
+# FINDING THE EQUILIIBRIA ----------------------------------------------------------------------------------------------
+# find equilibria for the given q_osynth values
+def find_equilibria_for_q_osynth_range(q_osynth_range, # range of burdens from other genes to consider
+                                       bifurcation_Freqbelow, bifurcation_Freqabove,    # bifurcation points
+                                       par, cellvars):  # system parameters and steady-state cellular variables
+    # get p_switch and q_osynth values at the bifurcation points
+    p_switch_bif_Freqbelow = bifurcation_Freqbelow['p_switch']
+    q_osynth_bif_Freqbelow = bifurcation_Freqbelow['q_osynth']
+    p_switch_bif_Freqabove = bifurcation_Freqabove['p_switch']
+    q_osynth_bif_Freqabove = bifurcation_Freqabove['q_osynth']
 
+    # initialise lists to record the bifurcation curve points in
     bifurcation_curve_q_osynth = []
     bifurcation_curve_p_switch = []
     bifurcation_curve_q_sas = []
     bifurcation_curve_p_ofp = []
+
+    # get the highest-possible p_switch value
+    p_switch_sup = find_p_switch_sup(par, cellvars)
+
     # get high-expression equilibria for q_osynth values where they are possible
     for q_osynth in q_osynth_range:
         # check if the high-expression equilibrium is possible
-        if(q_osynth<q_osynth_bif_Freqabove):
+        if (q_osynth < q_osynth_bif_Freqabove):
             # at high-expression equilibiria, p_switch is above the touch-above bifurcation value
-            hieq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=p_switch_bif_Freqabove, upper=p_switch_sup,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)  # required for vmapping and jitting
+            hieq_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                            lower=p_switch_bif_Freqabove, upper=p_switch_sup,
+                                            maxiter=10000, tol=1e-18,
+                                            check_bracket=False)  # required for vmapping and jitting
             p_switch_hieq = hieq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
 
             # record the high-expression equilibrium
             bifurcation_curve_q_osynth.append(q_osynth)
             bifurcation_curve_p_switch.append(p_switch_hieq)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max']*F_real_calc(p_switch_hieq, par))
+            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_hieq, par))
             bifurcation_curve_p_ofp.append(p_ofp_from_p_switch_and_q_osynth(p_switch_hieq, q_osynth, par, cellvars))
 
     # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqabove))
-    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqabove))
-    bifurcation_curve_q_sas.append(cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqabove, par))
-    bifurcation_curve_p_ofp.append(p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars))
+    bifurcation_curve_q_osynth.append(q_osynth_bif_Freqabove)
+    bifurcation_curve_p_switch.append(p_switch_bif_Freqabove)
+    bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_bif_Freqabove, par))
+    bifurcation_curve_p_ofp.append(
+        p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars))
 
     # get the saddle point for q_osynth values where they are possible
-    for q_osynth in np.flip(q_osynth_range):    # range flipped for continuity of the curve
+    for q_osynth in np.flip(q_osynth_range):  # range flipped for continuity of the curve
         # check if the saddle point is possible
-        if(q_osynth>q_osynth_bif_Freqbelow and q_osynth<q_osynth_bif_Freqabove):
+        if (q_osynth > q_osynth_bif_Freqbelow and q_osynth < q_osynth_bif_Freqabove):
             # at saddle points, p_switch is below the touch-below bifurcation value
-            sp_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=p_switch_bif_Freqbelow, upper=p_switch_bif_Freqabove,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)
+            sp_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                          lower=p_switch_bif_Freqbelow, upper=p_switch_bif_Freqabove,
+                                          maxiter=10000, tol=1e-18,
+                                          check_bracket=False)
             p_switch_sp = sp_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
             bifurcation_curve_q_osynth.append(q_osynth)
             bifurcation_curve_p_switch.append(p_switch_sp)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max']*F_real_calc(p_switch_sp, par))
+            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_sp, par))
             bifurcation_curve_p_ofp.append(p_ofp_from_p_switch_and_q_osynth(p_switch_sp, q_osynth, par, cellvars))
 
     # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(float(q_osynth_bif_Freqbelow))
-    bifurcation_curve_p_switch.append(float(p_switch_bif_Freqbelow))
-    bifurcation_curve_q_sas.append(cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqbelow, par))
-    bifurcation_curve_p_ofp.append(p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars))
+    bifurcation_curve_q_osynth.append(q_osynth_bif_Freqbelow)
+    bifurcation_curve_p_switch.append(p_switch_bif_Freqbelow)
+    bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_bif_Freqbelow, par))
+    bifurcation_curve_p_ofp.append(
+        p_ofp_from_p_switch_and_q_osynth(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars))
 
     # get the low-expression equilibria for q_osynth values where they are possible
-    for q_osynth in q_osynth_range: # range NOT flipped for continuity of the curve
+    for q_osynth in q_osynth_range:  # range NOT flipped for continuity of the curve
         # check if the low-expression equilibrium is possible
-        if(q_osynth>q_osynth_bif_Freqbelow):
+        if (q_osynth > q_osynth_bif_Freqbelow):
             # at low-expression equilibiria, p_switch is below the touch-below bifurcation value
-            leeq_problem=jaxopt.Bisection(optimality_fun=diff_from_pswitch,
-                                             lower=0, upper=p_switch_bif_Freqbelow,
-                                             maxiter=10000, tol=1e-18,
-                                             check_bracket=False)
+            leeq_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+                                            lower=0, upper=p_switch_bif_Freqbelow,
+                                            maxiter=10000, tol=1e-18,
+                                            check_bracket=False)
             p_switch_leeq = leeq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
             # record the low-expression equilibrium
             bifurcation_curve_q_osynth.append(q_osynth)
             bifurcation_curve_p_switch.append(p_switch_leeq)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max']*F_real_calc(p_switch_leeq, par))
+            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_leeq, par))
             bifurcation_curve_p_ofp.append(p_ofp_from_p_switch_and_q_osynth(p_switch_leeq, q_osynth, par, cellvars))
 
-
-    # plot the bifurcation curve
-    bkplot.output_file('bifurcation_curve.html')
-    bif_fig = bkplot.figure(
-        frame_width=480,
-        frame_height=360,
-        x_axis_label="q_p, probe burden",
-        y_axis_label="q_sas, self-activating switch burden",
-        x_range=(min(q_osynth_range), max(q_osynth_range)),
-        y_range=(0, cellvars['q_sas_max']),
-        title='Analytical bifurcation curve for self-activating switch',
-        tools="box_zoom,pan,hover,reset"
-    )
-    # plot the controlled variable vs control action
-    bif_fig.line(x=np.array(bifurcation_curve_q_osynth),
-                 y=np.array(bifurcation_curve_q_sas),
-                 line_width=1.5, line_color='black',
-                 legend_label='true steady states')
-    bif_fig.scatter(x=np.array(bifurcation_curve_q_osynth),
-                    y=np.array(bifurcation_curve_q_sas),
-                    marker='circle', size=5,
-                    color='black', legend_label='true steady states')
-    # legend formatting
-    bif_fig.legend.label_text_font_size = "8pt"
-    bif_fig.legend.location = "top_right"
-    bif_fig.legend.click_policy = 'hide'
-
-    # plot the real and required F_switch values at touch-below bifurcation
-    p_switch_range = np.linspace(0, p_switch_sup, 100)
-    F_real_range = F_real_calc(p_switch_range, par)
-    F_req_range = F_req_calc(p_switch_range,
-                             q_osynth_bif_Freqbelow,
-                             par, cellvars)
-    touch_fig = bkplot.figure(
-        frame_width=480,
-        frame_height=360,
-        x_axis_label="p_switch, switch protein level",
-        y_axis_label="F",
-        x_range=(0, p_switch_sup),
-        y_range=(0, 1),
-        title='F vs p_switch',
-        tools="box_zoom,pan,hover,reset"
-    )
-    # plot the controlled variable vs control action
-    touch_fig.line(x=p_switch_range,
-                   y=F_real_range,
-                   line_width=1.5, line_color='black',
-                   legend_label='F_real')
-    touch_fig.line(x=p_switch_range,
-                     y=F_req_range,
-                     line_width=1.5, line_color='red',
-                     legend_label='F_req')
-    # legend formatting
-    touch_fig.legend.label_text_font_size = "8pt"
-    touch_fig.legend.location = "top_right"
-    touch_fig.legend.click_policy = 'hide'
+    # return
+    return {'p_switch': np.array(bifurcation_curve_p_switch), 'q_osynth': np.array(bifurcation_curve_q_osynth),
+                'p_ofp': np.array(bifurcation_curve_p_ofp), 'q_sas': np.array(bifurcation_curve_q_sas)}
 
 
-    # show plot
-    bkplot.save(bklayouts.column(bif_fig, touch_fig))
-
-
+# MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
+def main():
     return
 
 

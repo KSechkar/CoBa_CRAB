@@ -60,6 +60,8 @@ def timed_switching_initialise():
     # -------- DEFAULT VALUES OF CONTROLLER PARAMETERS/INITIAL CONDITIONS CAN BE SPECIFIED FROM HERE...
     # time interval between switching references
     default_par['t_switch_ref'] = 10.0 # 10 h by default
+    # burn-in period for the first reference, meaning that we keep it t_burn_in hours before starting the timer
+    default_par['t_burn_in'] = 0.0 # 0 h by default
     # -------- ...TO HERE
 
     return default_par
@@ -77,7 +79,16 @@ def timed_switching_switch(i_ref,  # current reference index
                            meastimestep  # measurement time step
                            ):
     # -------- DEFINE SPECIFIC SWITCHING CONDITIONS FROM HERE...
-    condition = (t + meastimestep/2 >= t_last_ref_switch + par['t_switch_ref'])  # switch every t_switch_ref hours
+    condition=jnp.logical_or(
+        jnp.logical_and(
+            t_last_ref_switch <= par['t_burn_in'],
+            t + meastimestep / 2 >= par['t_burn_in'] + par['t_switch_ref']
+        ),
+        jnp.logical_and(
+            t_last_ref_switch > par['t_burn_in'],
+            t + meastimestep / 2 >= t_last_ref_switch + par['t_switch_ref']
+        )
+    )
     # (half of the measurement time step is added to the current time to avoid rounding errors)
     # -------- ...TO HERE
 

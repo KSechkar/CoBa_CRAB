@@ -54,9 +54,11 @@ def nocircuit_v(F_calc,     # calculating the transcription regulation functions
     return []
 
 
-# effective mRNA concentrations for genes expressed from the same operon with some others
-def nocircuit_eff_mRNA(x, par, name2pos):
-    return jnp.array([])
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def nocircuit_specterms(x, par, name2pos):
+    return (jnp.array([]), 0)
 
 
 # CONSTITUTIVELY EXPRESSED FLUORESCENT PROTEIN -------------------------------------------------------------------------
@@ -65,7 +67,7 @@ def nocircuit_eff_mRNA(x, par, name2pos):
 def constfp_initialise():
     # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
     genes = ['ofp']  # names of genes in the circuit: output fluorescent protein
-    miscs = []  # names of miscellaneous species involved in the circuit (e.g. metabolites)
+    miscs = ['ofp_mature']  # names of miscellaneous species involved in the circuit (e.g. metabolites)
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in x
@@ -81,7 +83,7 @@ def constfp_initialise():
     for i in range(0, len(genes)):
         name2pos['F_' + genes[i]] =  i  # transcription regulation functions (in F, not x!!!)
     for i in range(0, len(genes)):
-        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+        name2pos['s_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
 
     # default gene parameters to be imported into the main model's parameter dictionary
     default_par = {}
@@ -119,6 +121,9 @@ def constfp_initialise():
         default_init_conds[misc] = 0
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    default_par['mu_ofp']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['n_ofp_mature'] = default_par['n_ofp'] # protein length - same as the freshly synthesised protein
+    default_par['d_ofp_mature'] = default_par['d_ofp']  # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -164,12 +169,19 @@ def constfp_ode(F_calc,     # calculating the transcription regulation functions
     return [# mRNAs
             par['func_ofp'] * l * F[name2pos['F_ofp']] * par['c_ofp'] * par['a_ofp'] - (par['b_ofp'] + l) * x[name2pos['m_ofp']],
             # proteins
-            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']]
+            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']] - par['mu_ofp']*x[name2pos['p_ofp']],
+            # mature fluorescent proteins
+            par['mu_ofp']*x[name2pos['p_ofp']] - (l + par['d_ofp_mature']*p_prot)*x[name2pos['ofp_mature']]
     ]
 
-# effective mRNA concentrations for genes expressed from the same operon with some others
-def constfp_eff_mRNA(x, par, name2pos):
-    return jnp.array([x[name2pos['m_ofp']]]) # no co-expression
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def constfp_specterms(x, par, name2pos):
+    return (
+        jnp.array([x[name2pos['m_ofp']]]), # 1) no co-expression
+        par['d_ofp_mature'] * x[name2pos['ofp_mature']] * par['n_ofp_mature'] # 2) mature ofp degradation
+    )
 
 
 # SELF-ACTIVATING BISTABLE SWITCH --------------------------------------------------------------------------------------
@@ -180,7 +192,7 @@ def sas_initialise():
     genes = ['switch',  # self0activating swich
              'ofp']  # burdensome controlled gene
     # names of miscellaneous species involved in the circuit (none)
-    miscs = []
+    miscs = ['ofp_mature']  # mature ofp
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in x
@@ -196,7 +208,7 @@ def sas_initialise():
     for i in range(0, len(genes)):
         name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
     for i in range(0, len(genes)):
-        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+        name2pos['s_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
 
     # default gene parameters to be imported into the main model's parameter dictionary
     default_par = {}
@@ -240,6 +252,10 @@ def sas_initialise():
     default_par['eta_switch'] = 2 # Hill coefficient of the ta protein binding to the DNA
     default_par['baseline_switch'] = 0.1 # baseline expression of the burdensome gene
 
+    # output fluorescent protein maturation rate
+    default_par['mu_ofp']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['n_ofp_mature'] = default_par['n_ofp']  # protein length - same as the freshly synthesised protein
+    default_par['d_ofp_mature']=default_par['d_ofp'] # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -290,7 +306,7 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
     F = F_calc(t, x, u, par, name2pos)
 
     # ofp reporter co-expressed from the same operon as the switch => same mRNA conc., up to scaling for multiple-ribosome translation
-    # commented out as NOW TREATED USING SAS_EFF_MRNA FUNCTION!
+    # commented out as NOW TREATED USING SAS_SPECTERMS FUNCTION!
     # m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
 
     # RETURN THE ODE
@@ -299,13 +315,20 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
             0,  # ofp co-expressed with the switch
             # proteins
             (e / par['n_switch']) * (x[name2pos['m_switch']] / k_het[name2pos['k_switch']] / D) * R - (l + par['d_switch']*p_prot) * x[name2pos['p_switch']],
-            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']],
+            (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']] -par['mu_ofp']*x[name2pos['p_ofp']],
+            # mature ofp
+            par['mu_ofp']*x[name2pos['p_ofp']] - (l + par['d_ofp_mature']*p_prot)*x[name2pos['ofp_mature']]
     ]
 
-# effective mRNA concentrations for genes expressed from the same operon with some others
-def sas_eff_mRNA(x, par, name2pos):
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def sas_specterms(x, par, name2pos):
     m_ofp = x[name2pos['m_switch']] * par['n_ofp'] / par['n_switch']
-    return jnp.array([x[name2pos['m_switch']], m_ofp]) # ofp co-expressed with the switch gene
+    return (
+        jnp.array([x[name2pos['m_switch']], m_ofp]), # 1) ofp co-expressed with the switch gene
+        par['d_ofp_mature']*x[name2pos['ofp_mature']]   # 2) mature ofp still degraded
+    )
 
 
 # SECOND SELF-ACTIVATING BISTABLE SWITCH -------------------------------------------------------------------------------
@@ -316,7 +339,7 @@ def sas2_initialise():
     genes = ['switch2',  # self0activating swich
              'ofp2']  # burdensome controlled gene
     # names of miscellaneous species involved in the circuit (none)
-    miscs = []
+    miscs = ['ofp2_mature']
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in x
@@ -332,7 +355,7 @@ def sas2_initialise():
     for i in range(0, len(genes)):
         name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
     for i in range(0, len(genes)):
-        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+        name2pos['s_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
 
     # default gene parameters to be imported into the main model's parameter dictionary
     default_par = {}
@@ -376,6 +399,10 @@ def sas2_initialise():
     default_par['eta_switch2'] = 2 # Hill coefficient of the ta protein binding to the DNA
     default_par['baseline_switch2'] = 0.1 # baseline expression of the burdensome gene
 
+    # output fluorescent protein maturation
+    default_par['mu_ofp2']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['n_ofp2_mature'] = default_par['n_ofp']  # protein length - same as the freshly synthesised protein
+    default_par['d_ofp2_mature']=default_par['d_ofp'] # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -426,7 +453,7 @@ def sas2_ode(F_calc,     # calculating the transcription regulation functions
     F = F_calc(t, x, u, par, name2pos)
 
     # ofp reporter co-expressed from the same operon as the switch => same mRNA conc., up to scaling for multiple-ribosome translation
-    # commented out as NOW TREATED USING SAS_EFF_MRNA FUNCTION!
+    # commented out as NOW TREATED USING SAS2_SPECTERMS FUNCTION!
     # m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
 
     # RETURN THE ODE
@@ -435,13 +462,20 @@ def sas2_ode(F_calc,     # calculating the transcription regulation functions
             0,  # ofp co-expressed with the switch
             # proteins
             (e / par['n_switch2']) * (x[name2pos['m_switch2']] / k_het[name2pos['k_switch2']] / D) * R - (l + par['d_switch2']*p_prot) * x[name2pos['p_switch2']],
-            (e / par['n_ofp2']) * (x[name2pos['m_ofp2']] / k_het[name2pos['k_ofp2']] / D) * R - (l + par['d_ofp2']*p_prot) * x[name2pos['p_ofp2']],
+            (e / par['n_ofp2']) * (x[name2pos['m_ofp2']] / k_het[name2pos['k_ofp2']] / D) * R - (l + par['d_ofp2']*p_prot) * x[name2pos['p_ofp2']] - par['mu_ofp2']*x[name2pos['p_ofp2']],
+            # mature ofp2
+            par['mu_ofp2']*x[name2pos['p_ofp2']] - (l + par['d_ofp2_mature']*p_prot)*x[name2pos['ofp2_mature']]
     ]
 
-# effective mRNA concentrations for genes expressed from the same operon with some others
-def sas2_eff_mRNA(x, par, name2pos):
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def sas2_specterms(x, par, name2pos):
     m_ofp2 = x[name2pos['m_switch2']] * par['n_ofp2'] / par['n_switch2']
-    return jnp.array([x[name2pos['m_switch2']], m_ofp2]) # ofp co-expressed with the switch gene
+    return (
+        jnp.array([x[name2pos['m_switch2']], m_ofp2]),  # 1) ofp co-expressed with the switch gene
+        par['d_ofp2_mature'] * x[name2pos['ofp2_mature']]   # 2) zero for now
+    )
 
 
 # CHEMICALLY INDUCED, CYBERCONTROLLED GENE [tau-leap compatible, includes a synthetic protease]-------------------------
@@ -467,7 +501,7 @@ def cicc_initialise():
     for i in range(0, len(genes)):
         name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
     for i in range(0, len(genes)):
-        name2pos['mscale_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+        name2pos['s_' + genes[i]] =  i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
 
     # default gene parameters to be imported into the main model's parameter dictionary
     default_par = {}
@@ -565,6 +599,11 @@ def cicc_ode(F_calc,     # calculating the transcription regulation functions
             (e / par['n_b']) * (x[name2pos['m_b']] / k_het[name2pos['k_b']] / D) * R - (l + par['d_b']*p_prot) * x[name2pos['p_b']],
     ]
 
-# effective mRNA concentrations for genes expressed from the same operon with some others
-def cicc_eff_mRNA(x, par, name2pos):
-    return jnp.array([x[name2pos['m_ta']], x[name2pos['m_b']]]) # no co-expression
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def cicc_specterms(x, par, name2pos):
+    return (
+        jnp.array([x[name2pos['m_ta']], x[name2pos['m_b']]]),  # 1) no co-expression
+        0  # 2) zero for now
+    )

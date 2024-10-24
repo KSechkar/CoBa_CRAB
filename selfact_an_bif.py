@@ -191,7 +191,7 @@ def get_ss_F_and_e(nutr_qual):
     # load synthetic genetic modules (self-activating switch + unexpressed const. gene) and the controller (constant irrelevant input)
     odeuus_complete, \
         module1_F_calc, module2_F_calc, \
-        module1_eff_mRNA, module2_eff_mRNA, \
+        module1_specterms, module2_specterms, \
         controller_action, controller_update, \
         par, init_conds, controller_memo0, \
         synth_genes_total_and_each, synth_miscs_total_and_each, \
@@ -202,12 +202,12 @@ def get_ss_F_and_e(nutr_qual):
             gms.sas_initialise,  # function initialising the circuit
             gms.sas_ode,  # function defining the circuit ODEs
             gms.sas_F_calc, # function calculating the circuit genes' transcription regulation functions
-            gms.sas_eff_mRNA,  # function calculating the circuit genes' effective mRNA levels
+            gms.sas_specterms,  # function calculating the circuit genes' effective mRNA levels
             # module 2
             gms.cicc_initialise,  # function initialising the circuit
             gms.cicc_ode,  # function defining the circuit ODEs
             gms.cicc_F_calc,    # function calculating the circuit genes' transcription regulation functions
-            gms.cicc_eff_mRNA,  # function calculating the circuit genes' effective mRNA levels
+            gms.cicc_specterms,  # function calculating the circuit genes' effective mRNA levels
             # controller
             ctrls.cci_initialise,  # function initialising the controller
             ctrls.cci_action,  # function calculating the controller action
@@ -298,7 +298,7 @@ def get_ss_F_and_e(nutr_qual):
     es, _, F_rs, _, _, _, _ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
                                                                     synth_genes, synth_miscs,
                                                                     modules_name2pos,
-                                                                    module1_eff_mRNA, module2_eff_mRNA)
+                                                                    module1_specterms, module2_specterms)
     e = es[-1]
     F_r = F_rs[-1]
 

@@ -330,7 +330,7 @@ def pichem_initialise():
     # -------- SPECIFY CONTROLLER COMPONENTS FROM HERE...
     memos = ['ctrled_fp_level', 'integral']  # names of memory entries, updated with every measurement - fluorescence of the controlled gene, integral of the error
     dynvars = []  # names of dynamic variables, simulated using ODEs
-    ctrled_var = 'p_ofp' # name of the system's variabled read and steered by the controller
+    ctrled_var = 'p_ofp_mature' # name of the system's variabled read and steered by the controller
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in the memory vector or x (for dynvars)

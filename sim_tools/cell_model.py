@@ -75,12 +75,12 @@ class CellModelAuxiliary:
                                    module1_initialiser,  # function initialising the circuit
                                    module1_ode,  # function defining the circuit ODEs
                                    module1_F_calc, # function calculating the circuit genes' transcription regulation functions
-                                   module1_eff_mRNA,  # function calculating the effective mRNA concentrations due to possible co-expression of genes from the same operon
+                                   module1_specterms,  # function calculating the effective mRNA concentrations due to possible co-expression of genes from the same operon
                                    # module 2
                                    module2_initialiser,  # function initialising the circuit
                                    module2_ode,  # function defining the circuit ODEs
                                    module2_F_calc, # function calculating the circuit genes' transcription regulation functions
-                                   module2_eff_mRNA,  # function calculating the effective mRNA concentrations due to possible co-expression of genes from the same operon
+                                   module2_specterms,  # function calculating the effective mRNA concentrations due to possible co-expression of genes from the same operon
                                    # controller
                                    controller_initialiser,  # function initialising the controller
                                    controller_action,  # function calculating the control action
@@ -147,11 +147,17 @@ class CellModelAuxiliary:
             # module 1 and 2 F values kept as they are
             elif((key[0:2]=='F_')):
                 continue
+            # module 1 effective mRNA scaling factors kept as they are
+            elif((key[0:2]=='s_') and (key in module1_name2pos)):
+                continue
+            # module 2 effective mRNA scaling factors shifted by the number of module 1 mRNAs
+            elif ((key[0:2] == 's_') and (key in module2_name2pos)):
+                modules_name2pos[key] = modules_name2pos[key] + len(module1_genes)
             else: # miscellaneous species
                 #  module 1 misc shifted by the number of module 2 mRNAs and proteins
                 if(key in module1_name2pos):
                     modules_name2pos[key] = module1_name2pos[key] + 2 * len(module2_genes)
-                #  module 1 misc shifted by the number of module 1 mRNAs, proteins and miscs
+                #  module 2 misc shifted by the number of module 1 mRNAs, proteins and miscs
                 else:
                     modules_name2pos[key] = module2_name2pos[key] + 2 * len(module1_genes) +len(module1_miscs)
 
@@ -198,7 +204,7 @@ class CellModelAuxiliary:
         # add the geetic module and controller ODEs (as well as control action calculator) to that of the host cell model
         cellmodel_ode = lambda t, x, us, args: odeuus(t, x, us,
                                                       module1_ode_with_F_calc, module2_ode_with_F_calc,
-                                                      module1_eff_mRNA, module2_eff_mRNA,
+                                                      module1_specterms, module2_specterms,
                                                       controller_ode, controller_action,
                                                       args)
 
@@ -206,7 +212,7 @@ class CellModelAuxiliary:
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
         return (cellmodel_ode,
                 module1_F_calc, module2_F_calc,
-                module1_eff_mRNA, module2_eff_mRNA,
+                module1_specterms, module2_specterms,
                 controller_action, controller_update,
                 cellmodel_par, cellmodel_init_conds, controller_init_memory,
                 (synth_genes, module1_genes, module2_genes),
@@ -404,8 +410,8 @@ class CellModelAuxiliary:
 
             # some miscellaneous species may be heterologous proteins having undergone some changes
             for misc in synth_miscs:
-                if (misc[0:2] == 'p_'):
-                    top_line += xs[:, modules_name2pos[misc]] * par['n_' + misc[2:]]
+                if ('n_'+misc in par.keys()):
+                    top_line += xs[:, modules_name2pos[misc]] * par['n_' + misc]
 
             mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
                               line_width=0.5, line_color='black', fill_color=self.gene_colours['het'],
@@ -655,7 +661,7 @@ class CellModelAuxiliary:
                                 synth_genes_total_and_each,     # list of synthetic genes - total and for each module
                                 synth_miscs_total_and_each,     # list of synthetic miscellaneous species - total and for each module
                                 modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
-                                module1_eff_mRNA, module2_eff_mRNA, # calculating effective synthetic gene mRNA concentrations for each module
+                                module1_specterms, module2_specterms, # calculating module-specific terms of ODEs and cellular process rate definitions
                                 controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                                 modules_styles,  # colours for the circuit plots
                                 dimensions=(320, 180), tspan=None):
@@ -676,11 +682,11 @@ class CellModelAuxiliary:
             tspan = (ts[0], ts[-1])
 
         # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
-        module1_eff_mRNA_vmap = jax.vmap(module1_eff_mRNA, in_axes=(0, None, None))
-        module2_eff_mRNA_vmap = jax.vmap(module2_eff_mRNA, in_axes=(0, None, None))
+        module1_specterms_vmap = jax.vmap(module1_specterms, in_axes=(0, None, None))
+        module2_specterms_vmap = jax.vmap(module2_specterms, in_axes=(0, None, None))
         xs_eff = np.array(jnp.concatenate((xs[:, 0:8],
-                                          module1_eff_mRNA_vmap(xs, par, modules_name2pos),
-                                          module2_eff_mRNA_vmap(xs, par, modules_name2pos),
+                                          module1_specterms_vmap(xs, par, modules_name2pos)[0], # eff mRNA concs are the first output of specterms
+                                          module2_specterms_vmap(xs, par, modules_name2pos)[0], # eff mRNA concs are the first output of specterms
                                           xs[:, 8 + len(synth_genes):]), axis=1))
 
         # find values of gene transcription regulation functions
@@ -728,7 +734,7 @@ class CellModelAuxiliary:
                         par, # model parameters
                         synth_genes, synth_miscs,  # list of synthetic genes and miscellaneous species in the cell
                         modules_name2pos,  # dictionary mapping gene names to their positions in the state vector
-                        module1_eff_mRNA, module2_eff_mRNA, # calculating effective synthetic gene mRNA concentrations for each module
+                        module1_specterms, module2_specterms, # calculating module-specific terms of ODEs and cellular process rate definitions
                         controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                         controller_styles, # colours for the controller plots
                         u0, control_delay,  # initial control action and size of control action record needed to account for the delay
@@ -740,7 +746,7 @@ class CellModelAuxiliary:
                                   par,
                                   synth_genes, synth_miscs,
                                   modules_name2pos,
-                                  module1_eff_mRNA, module2_eff_mRNA,
+                                  module1_specterms, module2_specterms,
                                   controller_name2pos,
                                   ctrled_var)
 
@@ -864,7 +870,7 @@ class CellModelAuxiliary:
                         par, # model parameters
                         synth_genes, synth_miscs,   # list of synthetic genes and miscellaneous species in the cell
                         modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
-                        module1_eff_mRNA, module2_eff_mRNA, # calculating effective synthetic gene mRNA concentrations for each module
+                        module1_specterms, module2_specterms, # calculating module-specific terms of ODEs and cellular process rate definitions
                         controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                         controller_styles, # colours for the controller plots
                         u0, control_delay,  # initial control action and size of control action record needed to account for the delay
@@ -878,7 +884,7 @@ class CellModelAuxiliary:
                                   par,
                                   synth_genes, synth_miscs,
                                   modules_name2pos,
-                                  module1_eff_mRNA, module2_eff_mRNA,
+                                  module1_specterms, module2_specterms,
                                   controller_name2pos,
                                   ctrled_var)
 
@@ -898,7 +904,7 @@ class CellModelAuxiliary:
             tools="box_zoom,pan,hover,reset"
         )
         u_vs_var_fig.line(x=us_calc, y=x_ctrl, line_width=1.5, line_color='blue', legend_label='u calculated')
-        u_vs_var_fig.line(x=us_calc, y=x_ctrl, line_width=1.5, line_color='red', legend_label='u experienced')
+        u_vs_var_fig.line(x=uexprecord, y=x_ctrl, line_width=1.5, line_color='red', legend_label='u experienced')
         # legend formatting
         u_vs_var_fig.legend.label_text_font_size = "8pt"
         u_vs_var_fig.legend.location = "top_right"
@@ -909,7 +915,7 @@ class CellModelAuxiliary:
     # plot physiological variables: growth rate, translation elongation rate, ribosomal gene transcription regulation function, ppGpp concentration, tRNA charging rate, RC denominator
     def plot_phys_variables(self, ts, xs,
                             par, synth_genes, synth_miscs, modules_name2pos,
-                            module1_eff_mRNA, module2_eff_mRNA,
+                            module1_specterms, module2_specterms,
                             dimensions=(320, 180), tspan=None):
         # set default time span if unspecified
         if (tspan == None):
@@ -917,7 +923,7 @@ class CellModelAuxiliary:
 
         # get cell variables' values over time
         e, l, F_r, nu, _, T, D = self.get_e_l_Fr_nu_psi_T_D(ts, xs, par, synth_genes, synth_miscs,
-                                                            modules_name2pos, module1_eff_mRNA, module2_eff_mRNA)
+                                                            modules_name2pos, module1_specterms, module2_specterms)
 
         # Create a ColumnDataSource object for the plot
         data_for_column = {'t': np.array(ts), 'e': np.array(e), 'l': np.array(l), 'F_r': np.array(F_r),
@@ -1026,14 +1032,14 @@ class CellModelAuxiliary:
                               synth_genes,
                               synth_miscs,
                               modules_name2pos,
-                              module1_eff_mRNA, module2_eff_mRNA
+                              module1_specterms, module2_specterms
                               ):
         # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
-        module1_eff_mRNA_vmap = jax.vmap(module1_eff_mRNA, in_axes=(0, None, None))
-        module2_eff_mRNA_vmap = jax.vmap(module2_eff_mRNA, in_axes=(0, None, None))
+        module1_specterms_vmap = jax.vmap(module1_specterms, in_axes=(0, None, None))
+        module2_specterms_vmap = jax.vmap(module2_specterms, in_axes=(0, None, None))
         x_eff = np.array(jnp.concatenate((x[:, 0:8],
-                                 module1_eff_mRNA_vmap(x, par, modules_name2pos),
-                                 module2_eff_mRNA_vmap(x, par, modules_name2pos),
+                                 module1_specterms_vmap(x, par, modules_name2pos)[0],    # eff mRNA concs are the first output of specterms
+                                 module2_specterms_vmap(x, par, modules_name2pos)[0],    # eff mRNA concs are the first output of specterms
                                  x[:,8+len(synth_genes):]), axis=1))
 
         # give the state vector entries meaningful names
@@ -1081,7 +1087,12 @@ class CellModelAuxiliary:
         prodeflux = jnp.multiply(
             p_prot,
             jnp.sum(d_het * n_het * x_eff[:, 8 + len(synth_genes):8 + len(synth_genes) * 2],axis=1)
-        )
+        ) + jnp.multiply(
+            p_prot,
+            module1_specterms_vmap(x, par, modules_name2pos)[1]
+        ) + jnp.multiply(
+            p_prot,
+            module2_specterms_vmap(x, par, modules_name2pos)[1])   # include miscellaneous species' contribtuions
         # heterologous protein degradation flux
         prodeflux_times_H_div_eR = prodeflux * H / (e * R)
 
@@ -1111,16 +1122,16 @@ class CellModelAuxiliary:
                    par,
                    synth_genes, synth_miscs,
                    modules_name2pos,
-                   module1_eff_mRNA, module2_eff_mRNA,
+                   module1_specterms, module2_specterms,
                    controller_name2pos,
                    ctrled_var
                    ):
         # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
-        module1_eff_mRNA_vmap = jax.vmap(module1_eff_mRNA, in_axes=(0, None, None))
-        module2_eff_mRNA_vmap = jax.vmap(module2_eff_mRNA, in_axes=(0, None, None))
+        module1_specterms_vmap = jax.vmap(module1_specterms, in_axes=(0, None, None))
+        module2_specterms_vmap = jax.vmap(module2_specterms, in_axes=(0, None, None))
         x_eff = np.array(jnp.concatenate((x[:, 0:8],
-                                          module1_eff_mRNA_vmap(x, par, modules_name2pos),
-                                          module2_eff_mRNA_vmap(x, par, modules_name2pos),
+                                          module1_specterms_vmap(x, par, modules_name2pos)[0],   # eff mRNA concs are the first output of specterms
+                                          module2_specterms_vmap(x, par, modules_name2pos)[0],   # eff mRNA concs are the first output of specterms
                                           x[:, 8 + len(synth_genes):]), axis=1))
 
         # get calculated control actions
@@ -1138,7 +1149,7 @@ class CellModelAuxiliary:
                 module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
                 par, # model parameters
                 synth_genes_total_and_each,     # list of synthetic genes - total and for each module
-                module1_eff_mRNA, module2_eff_mRNA, # calculating effective synthetic gene mRNA concentrations for each module
+                module1_specterms, module2_specterms, # calculating module-specific terms of ODEs and cellular process rate definitions
                 modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
                ):
         # unpack synthetic gene lists
@@ -1151,11 +1162,11 @@ class CellModelAuxiliary:
             return None
 
         # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
-        module1_eff_mRNA_vmap = jax.vmap(module1_eff_mRNA, in_axes=(0, None, None))
-        module2_eff_mRNA_vmap = jax.vmap(module2_eff_mRNA, in_axes=(0, None, None))
+        module1_specterms_vmap = jax.vmap(module1_specterms, in_axes=(0, None, None))
+        module2_specterms_vmap = jax.vmap(module2_specterms, in_axes=(0, None, None))
         xs_eff = np.array(jnp.concatenate((xs[:, 0:8],
-                                           module1_eff_mRNA_vmap(xs, par, modules_name2pos),
-                                           module2_eff_mRNA_vmap(xs, par, modules_name2pos),
+                                           module1_specterms_vmap(xs, par, modules_name2pos)[0],    # eff mRNA concs are the first output of specterms
+                                           module2_specterms_vmap(xs, par, modules_name2pos)[0],    # eff mRNA concs are the first output of specterms
                                            xs[:, 8 + len(synth_genes):]), axis=1))
 
         # find values of gene transcription regulation functions
@@ -1173,7 +1184,7 @@ class CellModelAuxiliary:
 def odeuus(t, x, # simulation time and state vector
            us, # control action record - from the one calclated control_delay hours ago to the latest calculated control action
            module1_ode, module2_ode,  # ODEs for the genetic modules
-           module1_eff_mRNA, module2_eff_mRNA,  # corrections for effective mRNA concentrations for the genetic modules
+           module1_specterms, module2_specterms,  # corrections for effective mRNA concentrations for the genetic modules
            controller_ode, controller_action,  # ODE and control action calculation for the controller
            args):
     # unpack the args
@@ -1193,9 +1204,11 @@ def odeuus(t, x, # simulation time and state vector
     ref = args[8]
 
     # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
+    module1_eff_mRNA, module1_misc_deflux_cont = module1_specterms(x, par, modules_name2pos)
+    module2_eff_mRNA, module2_misc_deflux_cont = module2_specterms(x, par, modules_name2pos)
     x_eff = jnp.concatenate((x[0:8],
-                             module1_eff_mRNA(x, par, modules_name2pos),
-                             module2_eff_mRNA(x, par, modules_name2pos),
+                             module1_eff_mRNA,
+                             module2_eff_mRNA,
                              x[8 + num_synth_genes:]))
 
     # give the state vector entries meaningful names
@@ -1235,7 +1248,7 @@ def odeuus(t, x, # simulation time and state vector
     prodeflux = jnp.sum(
         # (degradation rate times protease level times protein concnetration) times number of AAs per protein
         d_het * p_prot * x_eff[8 + num_synth_genes:8 + num_synth_genes * 2] * n_het
-    )
+    ) + module1_misc_deflux_cont*p_prot + module2_misc_deflux_cont *p_prot    # contributions of genetic modules' miscellaneous species
     prodeflux_times_H_div_eR = prodeflux * H / (e * R)  # degradation flux scaled by overall protein synthesis rate
 
     # resource competition denominator
@@ -1436,7 +1449,7 @@ def main():
     # load synthetic genetic modules and the controller
     (odeuus_complete, \
         module1_F_calc, module2_F_calc, \
-        module1_eff_mRNA, module2_eff_mRNA, \
+        module1_specterms, module2_specterms, \
         controller_action, controller_update, \
         par, init_conds, controller_memo0, \
         synth_genes_total_and_each, synth_miscs_total_and_each, \
@@ -1447,18 +1460,22 @@ def main():
             gms.constfp_initialise,  # function initialising the circuit
             gms.constfp_ode,  # function defining the circuit ODEs
             gms.constfp_F_calc, # function calculating the circuit genes' transcription regulation functions
-            gms.constfp_eff_mRNA,   # function correcting the effective mRNA concentrations due to possible co-expression from the same operons
+            gms.constfp_specterms,   # function correcting the effective mRNA concentrations due to possible co-expression from the same operons
             # module 2
             gms.cicc_initialise,  # function initialising the circuit
             gms.cicc_ode,  # function defining the circuit ODEs
             gms.cicc_F_calc,
-            gms.cicc_eff_mRNA,  # function correcting the effective mRNA concentrations due to possible co-expression from the same operons
+            gms.cicc_specterms,  # function correcting the effective mRNA concentrations due to possible co-expression from the same operons
             # function calculating the circuit genes' transcription regulation functions
             # controller
             ctrls.pichem_initialise,  # function initialising the controller
             ctrls.pichem_action,  # function calculating the controller action
             ctrls.pichem_ode,  # function defining the controller ODEs
             ctrls.pichem_update,  # function updating the controller based on measurements
+            # ctrls.cci_initialise,  # function initialising the controller
+            # ctrls.cci_action,  # function calculating the controller action
+            # ctrls.cci_ode,  # function defining the controller ODEs
+            # ctrls.cci_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
             cellmodel_par_with_refswitch, init_conds)
 
@@ -1472,35 +1489,36 @@ def main():
 
     # SET PARAMETERS
     # set the parameters for the synthetic genes
-    par['c_ofp']=10
-    par['a_ofp']=1000
-    par['c_ta']=100
-    par['a_ta']=10
-    par['c_b']=100
-    par['a_b']=2000
+    par['c_ofp'] = 100
+    par['a_ofp'] = 1000
+    par['c_ta'] = 100
+    par['a_ta'] = 10
+    par['c_b'] = 100
+    par['a_b'] = 2000
 
     # controller
     init_conds['inducer_level']=1000.0
 
     # SET CONTROLLER PARAMETERS
-    controller_ctrledvar='p_ofp' # variable read and steered by the controller
+    controller_ctrledvar='ofp_mature' # variable read and steered by the controller
+    experiment_duration=80.0
     points_in_space=10
-    refs=np.linspace(2.2e4, 2e4, points_in_space) # reference values
-    par['t_switch_ref']=20/points_in_space    # time of reference switch
+    refs=np.linspace(1.7e4, 1e4, points_in_space) # reference values
+    par['t_switch_ref']=experiment_duration/points_in_space    # time of reference switch
 
-    control_delay=0   # control action delay
+    control_delay=0.0   # control action delay
     u0=0.0  # initial control action
 
     # inducer level when the bang-bang input is ON
     # par['inducer_level_on']=1e3
     # par['on_when_below_ref']=False
 
-    par['Kp']=-1
+    par['Kp']=-0.01
     par['Ki']=0
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
-    tf = (0.0, 20.0)  # simulation time frame
+    tf = (0.0, experiment_duration)  # simulation time frame
 
     # measurement time step
     meastimestep = 0.1  # hours
@@ -1567,7 +1585,7 @@ def main():
                                                                                                            synth_genes,
                                                                                                            synth_miscs,
                                                                                                            modules_name2pos,
-                                                                                                           module1_eff_mRNA, module2_eff_mRNA)  # plot simulation results
+                                                                                                           module1_specterms, module2_specterms)  # plot simulation results
     bkplot.save(bklayouts.grid([[mass_fig, nat_mrna_fig, nat_prot_fig],
                                 [nat_trna_fig, h_fig, l_figure],
                                 [e_figure, Fr_figure, ppGpp_figure]]))
@@ -1590,7 +1608,7 @@ def main():
                                                     synth_genes_total_and_each,     # list of synthetic genes - total and for each module
                                                     synth_miscs_total_and_each,     # list of synthetic miscellaneous species - total and for each module
                                                     modules_name2pos,   # dictionary mapping gene names to their positions in the state vector
-                                                    module1_eff_mRNA, module2_eff_mRNA, # corrections for effective mRNA concentrations for the genetic modules
+                                                    module1_specterms, module2_specterms, # corrections for effective mRNA concentrations for the genetic modules
                                                     controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                                                     modules_styles)  # plot simulation results
     # plot controller memory, dynamic variables and actions
@@ -1603,7 +1621,7 @@ def main():
                                                                                             par,
                                                                                             synth_genes, synth_miscs,
                                                                                             modules_name2pos,
-                                                                                            module1_eff_mRNA, module2_eff_mRNA,
+                                                                                            module1_specterms, module2_specterms,
                                                                                             controller_name2pos,
                                                                                             controller_styles,
                                                                                             u0, control_delay)
@@ -1618,7 +1636,7 @@ def main():
                                                              par,
                                                              synth_genes, synth_miscs,
                                                              modules_name2pos,
-                                                             module1_eff_mRNA, module2_eff_mRNA,
+                                                             module1_specterms, module2_specterms,
                                                              controller_name2pos,
                                                              controller_styles,
                                                              u0, control_delay)

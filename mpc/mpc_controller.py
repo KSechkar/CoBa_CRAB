@@ -30,6 +30,8 @@ def mpc_sys_model(t, x,  # time, cell state
     # unpack the state vector: probe
     p_ta = x[3]  # transcriiption activator protein concentration
     p_b = x[4]  # gene b mRNA concentration
+    # unpack the state vector: ribosomes
+    R = x[5]  # ribosome count in the cell
 
     # get the transcription regulation function for the self-activating switch
     p_switch_term = p_s * par['mpc_I_switch'] / par['mpc_K_switch']
@@ -355,16 +357,23 @@ def main():
     horizon_steps=10    # prediction horizon in measurement time steps
     meastimestep=0.1    # measurement time step
     dt=1e-5    # Euler time step
-    u0=0.0
-    us=jnp.array([0.0]*horizon_steps)
+    u0=2.0
+    us=jnp.array([1.0]*horizon_steps)
     control_delay=0.0
 
     # SIMULATE THE SYSTEM
-    ts_jnp, xs_jnp, u_exps_jnp=simulate_mpc_sys_model(x0, ref, u0, us,
-                                                      control_delay, meastimestep, horizon_steps, dt, par)
-    ts=np.array(ts_jnp)
-    xs=np.array(xs_jnp)
-    u_exps=np.array(u_exps_jnp)
+    u0=u_experienced_mpc(0,  # current time
+                      u0, us,
+                      # initial control action, vector of control actions to be applied over the prediction horizon
+                      control_delay,  # control delay
+                      meastimestep,  # measurement time step
+                      horizon_steps,  # prediction horizon (in number of measurement time steps)
+                      )
+    # ts_jnp, xs_jnp, u_exps_jnp=simulate_mpc_sys_model(x0, ref, u0, us,
+    #                                                   control_delay, meastimestep, horizon_steps, dt, par)
+    # ts=np.array(ts_jnp)
+    # xs=np.array(xs_jnp)
+    # u_exps=np.array(u_exps_jnp)
 
     # PLOT THE RESULTS
     bkplot.output_file(filename="mpc_sim.html",

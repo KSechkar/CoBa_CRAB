@@ -8,6 +8,24 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+# COMMON FUNCTIONS -----------------------------------------------------------------------------------------------------
+# exerting control through pulse-width modulation
+def pwm_action(u_avg,  # average control action
+               t,  # time
+               min_u,  # minimum control action
+               max_u,  # maximum control action
+               duty_cycle):  # duty cycle duration
+    # find the appropriate pulse width
+    pulse_width = jnp.clip(duty_cycle * (u_avg-min_u) / (max_u-min_u), 0, duty_cycle)
+
+    # chemical inducer concentration supplied: max_input for the first pulse_width fraction of the duty cycle, 0 otherwise
+    time_into_duty_cycle = t % duty_cycle
+    u = max_u * (time_into_duty_cycle < pulse_width) + min_u * (time_into_duty_cycle >= pulse_width)
+
+    # return the control action as well as intended average control action and pulse width (for diagnostics)
+    return u, u_avg, pulse_width
+
+
 # CONSTANT CHEMICAL INPUT ----------------------------------------------------------------------------------------------
 # initialise all the necessary parameters to simulate the circuit
 # return the default parameters and initial conditions, species name to ODE vector position decoder and plot colour palette
@@ -359,6 +377,11 @@ def pichem_initialise():
     default_par['Ki'] = 0.01  # integral control gain
     
     default_init_memo[name2pos['integral']] = 0.0  # initial integral value
+
+    # pulse-width modulation
+    default_par['pwm'] = False  # by default, no PWM
+    default_par['max_input'] = 1e3  # maximum input value
+    default_par['duty_cycle'] = 0.01  # duty cycle duration [h]
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -390,14 +413,16 @@ def pichem_action(t,x, # simulation time, system state
                controller_name2pos, # controller name to position decoder
                ctrled_var # name of the system's variable read and steered by the controller
                ):
-    # value of the controlled variable
-    x_ctrled=x[modules_name2pos[ctrled_var]]
+    # value of the controlled variable - from the last measurement
+    x_ctrled=ctrl_memo[controller_name2pos['ctrled_fp_level']]
 
     # calculate input to the system
     u_calc=par['Kp']*(ref-x_ctrled)+par['Ki']*ctrl_memo[controller_name2pos['integral']]
+    u_clipped = jnp.clip(u_calc, 0, par['max_input'])   # clip the control action to the allowed range
 
-    # chemical inducer concentration must be non-negative
-    u=u_calc*(u_calc>=0)
+    # exert control action - through PWM or not
+    u = (not par['pwm']) * u_clipped + par['pwm'] * pwm_action(u_avg=u_clipped, t=t, min_u=0, max_u=par['max_input'],
+                                                               duty_cycle=par['duty_cycle'])[0]
 
     # return input
     return u
@@ -436,3 +461,4 @@ def pichem_update(t, x,  # time, cell state
         # update integral term
         integral
     ])
+

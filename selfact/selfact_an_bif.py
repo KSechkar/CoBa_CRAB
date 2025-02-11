@@ -268,10 +268,10 @@ def get_ss_F_and_e(nutr_qual):
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
-    tf = (0.0, 50.0)  # simulation time frame - assuming the steady state is reached in 50 hours
+    tf = (0.0, 48.0)  # simulation time frame - assuming the steady state is reached in 48 hours
 
     # measurement time step
-    meastimestep = 50.0  # hours
+    meastimestep = 48.0  # hours
 
     # choose ODE solver
     ode_solver, us_size = odesols.create_diffrax_solver(odeuus_complete,

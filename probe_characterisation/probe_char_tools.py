@@ -4,6 +4,7 @@
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
 import numpy as np
+import scipy as sp
 import jax
 import jax.numpy as jnp
 import jaxopt
@@ -71,24 +72,25 @@ def Q_calc_one(mu_constrep,                                                     
     return Q_unknown
 
 # INTERPOLATE A MAPPING FROM DATA --------------------------------------------------------------------------------------
-# create an interpolation function for a mapping
-def make_interpolator(mapping_data):
-    # get the u and y values from the data
+# CUSTOM (works badly)
+# return an interpolation function for a mapping from data
+def make_custom_interpolator(mapping_data):
+    # unpack the experimental data for mapping reconstruction
     u_data = jnp.array(mapping_data[0])
     y_data = jnp.array(mapping_data[1])
     Q_data = jnp.array(mapping_data[2])
 
 
     # create an interpolation function
-    interpolator = functools.partial(interpolate_Q, u_data=u_data, y_data=y_data, Q_data=Q_data)
+    interpolator = functools.partial(interpolate_Q_custom, u_data=u_data, y_data=y_data, Q_data=Q_data)
 
     # return the interpolation function
     return interpolator
 
-# interpolate Q or Q' value for a (u, y_probe) pair from data
-# @jax.jit
-def interpolate_Q(u, y,
-                  u_data, y_data, Q_data):
+# custom mapping function: interpolate Q or Q' value for a (u, y_probe) pair from data
+@jax.jit
+def interpolate_Q_custom(u, y,
+                        u_data, y_data, Q_data):
     # get normalising factors for distances in u and y
     u_norm = jnp.max(u_data) - jnp.min(u_data)
     y_norm = jnp.max(y_data) - jnp.min(y_data)
@@ -145,11 +147,92 @@ def interpolate_Q(u, y,
 
     return Q
 
-# return 1/distance if condition true , 0 otherwise
+#  for custom mapping: return 1/distance if condition true , 0 otherwise
 def one_div_dist_conditional(distance, condition):
     return jax.lax.select(pred = condition,
                           on_true = 1.0/distance,
                           on_false = jnp.zeros_like(distance))
+
+
+# SCIPY RBF
+# return an interpolation function for a mapping from data
+def make_interpolator_sp_rbf(mapping_data,  # experimental data for mapping reconstruction
+                             rbf_func='cubic',  # radial basis function to use for interpolation
+                             normalise_u_and_y=True  # whether to normalise u and y values to their range (as u and y scales are different)
+                             ):
+    # unpack the experimental data for mapping reconstruction
+    u_data = np.array(mapping_data[0])
+    y_data = np.array(mapping_data[1])
+    Q_data = np.array(mapping_data[2])
+
+    # get normalising factors for distances in u and y
+    if(normalise_u_and_y):
+        u_norm = np.max(u_data) - np.min(u_data)
+        y_norm = np.max(y_data) - np.min(y_data)
+    else:
+        u_norm = 1.0
+        y_norm = 1.0
+
+    # create a scipy interpolator
+    sp_rbf_interpolator = sp.interpolate.Rbf(u_data / u_norm, y_data / y_norm,
+                                             Q_data,
+                                             function=rbf_func)
+
+    # include normalisation if needed, clip Q to be non-negative
+    interpolator = lambda u, y: max(sp_rbf_interpolator(u/u_norm, y/y_norm),0.0)
+
+    return interpolator
+
+# SCIPY LINEAR ND
+# return an interpolation function for a mapping from data
+def make_interpolator_sp_lnd(mapping_data,  # experimental data for mapping reconstruction
+                             normalise_u_and_y=True  # whether to normalise u and y values to their range (as u and y scales are different)
+                             ):
+    # unpack the experimental data for mapping reconstruction
+    u_data = np.array(mapping_data[0])
+    y_data = np.array(mapping_data[1])
+    Q_data = np.array(mapping_data[2])
+
+    # get normalising factors for distances in u and y
+    if(normalise_u_and_y):
+        u_norm = np.max(u_data) - np.min(u_data)
+        y_norm = np.max(y_data) - np.min(y_data)
+    else:
+        u_norm = 1.0
+        y_norm = 1.0
+
+    # create a scipy linear ND interpolator
+    sp_lnd_interpolator = sp.interpolate.LinearNDInterpolator(list(zip(u_data, y_data)),
+                                                              Q_data,
+                                                              rescale=normalise_u_and_y,
+                                                              fill_value=0.0)
+
+    # include normalisation if needed, clip Q to be non-negative
+    interpolator = lambda u, y: max(sp_lnd_interpolator(u, y),0.0)
+
+    return interpolator
+
+# SCIPY CLOUGH-TOCHER
+# return an interpolation function for a mapping from data
+def make_interpolator_sp_clt(mapping_data,  # experimental data for mapping reconstruction
+                             normalise_u_and_y=True
+                             # whether to normalise u and y values to their range (as u and y scales are different)
+                             ):
+    # unpack the experimental data for mapping reconstruction
+    u_data = np.array(mapping_data[0])
+    y_data = np.array(mapping_data[1])
+    Q_data = np.array(mapping_data[2])
+
+    # create a scipy Clough-Tocher interpolator
+    sp_clt_interpolator = sp.interpolate.CloughTocher2DInterpolator(list(zip(u_data, y_data)),
+                                                                    Q_data,
+                                                                    rescale=normalise_u_and_y,
+                                                                    fill_value=0.0)
+
+    # clip Q to be non-negative
+    interpolator = lambda u, y: max(sp_clt_interpolator(u, y),0.0)
+
+    return interpolator
 
 
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
@@ -182,8 +265,8 @@ def main():
     print(y_mesh_est)
 
     # create interpolation functions
-    interpolator_Q = make_interpolator(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
-    interpolator_Qdash = make_interpolator(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
+    interpolator_Q = make_interpolator_sp_lnd(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
+    interpolator_Qdash = make_interpolator_sp_lnd(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
 
     # get the estimates
     Q_est = np.zeros_like(us_mesh_est)

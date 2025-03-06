@@ -522,8 +522,8 @@ def sas2_initialise():
 
     # output fluorescent protein maturation
     default_par['mu_ofp2']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
-    default_par['n_ofp2_mature'] = default_par['n_ofp']  # protein length - same as the freshly synthesised protein
-    default_par['d_ofp2_mature']=default_par['d_ofp'] # mature ofp degradation rate - same as the freshly synthesised protein
+    default_par['n_ofp2_mature'] = default_par['n_ofp2']  # protein length - same as the freshly synthesised protein
+    default_par['d_ofp2_mature']=default_par['d_ofp2'] # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)

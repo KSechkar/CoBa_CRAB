@@ -74,7 +74,7 @@ def values_for_analytical(par,  # dictionary with model parameters
            t_to_steady=50, rtol=1e-6, atol=1e-6     # simulation parameters: time until steady state, relative and absolute tolerances
            ):
     # auxiliary tools for simulating the model and plotting simulation outcomes
-    cellmodel_auxil = CellModelAuxiliary()
+    model_auxil = ModelAuxiliary()
 
     # GET E, F_R AND H VALUES ------------------------------------------------------------------------------------------
     # parameters for simulation to get e and F_r values - not taking into account synthetic genes save for cat
@@ -86,17 +86,17 @@ def values_for_analytical(par,  # dictionary with model parameters
     par4eFr['k_sxf'] = 0 # make the strand exchange rate equal to 0
 
     # get the jaxed synthetic gene parameters
-    sgp4j = cellmodel_auxil.synth_gene_params_for_jax(par4eFr, circuit_genes)
+    sgp4j = model_auxil.synth_gene_params_for_jax(par4eFr, circuit_genes)
 
     # simulate the cell model to find the steady state
     sol=get_steady_state(par4eFr, ode_with_circuit,
-                            cellmodel_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
+                            model_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
                             len(circuit_genes), len(circuit_miscs), circuit_name2pos, sgp4j, t_to_steady, rtol, atol)
     ts = np.array(sol.ts)
     xs = np.array(sol.ys)
 
     # get the e and F_r values - now with ORIGINAL parameters
-    es,_,F_rs,_,_,_,_,_ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts,xs,par,circuit_genes,circuit_miscs,circuit_name2pos)
+    es,_,F_rs,_,_,_,_,_ = model_auxil.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts,xs,par,circuit_genes,circuit_miscs,circuit_name2pos)
     e=es[-1]
     F_r=F_rs[-1]
 
@@ -118,7 +118,7 @@ def values_for_analytical(par,  # dictionary with model parameters
     par4xi['k_sxf'] = 0  # make the strand exchange rate equal to 0
 
     # get the jaxed synthetic gene parameters
-    sgp4j = cellmodel_auxil.synth_gene_params_for_jax(par4xi, circuit_genes)
+    sgp4j = model_auxil.synth_gene_params_for_jax(par4xi, circuit_genes)
 
     # Simulate the cell model t find the steady state
     vector_field = lambda t, y, args: ode_with_circuit(t, y, args)
@@ -130,7 +130,7 @@ def values_for_analytical(par,  # dictionary with model parameters
         sgp4j  # relevant synthetic gene parameters in jax.array form
     )
     sol = get_steady_state(par4xi, ode_with_circuit,
-                            cellmodel_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
+                            model_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
                             len(circuit_genes), len(circuit_miscs), circuit_name2pos, sgp4j, t_to_steady, rtol, atol)
     ts = np.array(sol.ts)
     xs = np.array(sol.ys)
@@ -174,7 +174,7 @@ def values_for_analytical_sep(par,  # dictionary with model parameters
            t_to_steady=50, rtol=1e-6, atol=1e-6     # simulation parameters: time until steady state, relative and absolute tolerances
            ):
     # auxiliary tools for simulating the model and plotting simulation outcomes
-    cellmodel_auxil = CellModelAuxiliary()
+    model_auxil = ModelAuxiliary()
 
     # GET E, F_R AND H VALUES ------------------------------------------------------------------------------------------
     # parameters for simulation to get e and F_r values - not taking into account synthetic genes save for cat
@@ -186,17 +186,17 @@ def values_for_analytical_sep(par,  # dictionary with model parameters
     par4eFr['k_sxf'] = 0 # make the strand exchange rate equal to 0
 
     # get the jaxed synthetic gene parameters
-    sgp4j = cellmodel_auxil.synth_gene_params_for_jax(par4eFr, circuit_genes)
+    sgp4j = model_auxil.synth_gene_params_for_jax(par4eFr, circuit_genes)
 
     # simulate the cell model to find the steady state
     sol=get_steady_state(par4eFr, ode_with_circuit,
-                            cellmodel_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
+                            model_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
                             len(circuit_genes), len(circuit_miscs), circuit_name2pos, sgp4j, t_to_steady, rtol, atol)
     ts = np.array(sol.ts)
     xs = np.array(sol.ys)
 
     # get the e and F_r values - now with ORIGINAL parameters
-    es,_,F_rs,_,_,_,_,_ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts,xs,par,circuit_genes,circuit_miscs,circuit_name2pos)
+    es,_,F_rs,_,_,_,_,_ = model_auxil.get_e_l_Fr_nu_psi_T_D_Dnodeg(ts,xs,par,circuit_genes,circuit_miscs,circuit_name2pos)
     e=es[-1]
     F_r=F_rs[-1]
 
@@ -218,7 +218,7 @@ def values_for_analytical_sep(par,  # dictionary with model parameters
     par4xi['k_sxf'] = 0  # make the strand exchange rate equal to 0
 
     # get the jaxed synthetic gene parameters
-    sgp4j = cellmodel_auxil.synth_gene_params_for_jax(par4xi, circuit_genes)
+    sgp4j = model_auxil.synth_gene_params_for_jax(par4xi, circuit_genes)
 
     # Simulate the cell model t find the steady state
     vector_field = lambda t, y, args: ode_with_circuit(t, y, args)
@@ -230,7 +230,7 @@ def values_for_analytical_sep(par,  # dictionary with model parameters
         sgp4j  # relevant synthetic gene parameters in jax.array form
     )
     sol = get_steady_state(par4xi, ode_with_circuit,
-                            cellmodel_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
+                            model_auxil.x0_from_init_conds(init_conds, circuit_genes, circuit_miscs),
                             len(circuit_genes), len(circuit_miscs), circuit_name2pos, sgp4j, t_to_steady, rtol, atol)
     ts = np.array(sol.ts)
     xs = np.array(sol.ys)

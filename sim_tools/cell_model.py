@@ -57,7 +57,7 @@ def Fr_calc(par, T):
 
 # CELL MODEL AUXILIARIES -----------------------------------------------------------------------------------------------
 # Auxiliries for the cell model - set up default parameters and initial conditions, plot simulation outcomes
-class CellModelAuxiliary:
+class ModelAuxiliary:
     # INITIALISE
     def __init__(self):
         # plotting colours
@@ -87,7 +87,7 @@ class CellModelAuxiliary:
                                    controller_ode,  # function defining the controller ODEs
                                    controller_update,  # function updating the controller based on measurements
                                    # cell model parameters and initial conditions
-                                   cellmodel_par, cellmodel_init_conds,
+                                   model_par, model_init_conds,
                                    # host cell model parameters and initial conditions
                                    # optional support for hybrid simulations
                                    module1_v=None, module2_v=None  # optional stochastic components for the circuit
@@ -100,16 +100,16 @@ class CellModelAuxiliary:
             controller_name2pos, controller_styles = controller_initialiser()
 
         # update parameter, initial condition
-        cellmodel_par.update(module1_par)
-        cellmodel_par.update(module2_par)
-        cellmodel_par.update(controller_par)
-        cellmodel_init_conds.update(module1_init_conds)
-        cellmodel_init_conds.update(module2_init_conds)
-        cellmodel_init_conds.update(controller_init_conds)
+        model_par.update(module1_par)
+        model_par.update(module2_par)
+        model_par.update(controller_par)
+        model_init_conds.update(module1_init_conds)
+        model_init_conds.update(module2_init_conds)
+        model_init_conds.update(controller_init_conds)
         
         # parameter merge special case: presence of CAT or protease genes in one module means it's present overall
-        cellmodel_par['cat_gene_present'] = module1_par['cat_gene_present'] or module2_par['cat_gene_present']
-        cellmodel_par['prot_gene_present'] = module1_par['prot_gene_present'] or module2_par['prot_gene_present']
+        model_par['cat_gene_present'] = module1_par['cat_gene_present'] or module2_par['cat_gene_present']
+        model_par['prot_gene_present'] = module1_par['prot_gene_present'] or module2_par['prot_gene_present']
 
         # merge style dictionaries for the two modules
         modules_styles = module1_styles.copy()
@@ -128,15 +128,15 @@ class CellModelAuxiliary:
                 continue
             # module 2 mRNAs shifted by the number of module 1 mRNAs
             elif((key[0:2]=='m_') and (key in module2_name2pos)):
-                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') or (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                if ((model_par['cat_gene_present'] or key[2:] != 'cat') or (model_par['prot_gene_present'] or key[2:] != 'prot')):
                     modules_name2pos[key] = modules_name2pos[key] + len(module1_genes)
             # module 1 proteins shifted by the number of module 2 mRNAs
             elif((key[0:2]=='p_') and (key in module1_name2pos)):
-                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') and (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                if ((model_par['cat_gene_present'] or key[2:] != 'cat') and (model_par['prot_gene_present'] or key[2:] != 'prot')):
                     modules_name2pos[key] = modules_name2pos[key] + len(module2_genes)
             # module 2 proteins shifted by the number of module 1 mRNAs and proteins
             elif((key[0:2]=='p_') and (key in module2_name2pos)):
-                if ((cellmodel_par['cat_gene_present'] or key[2:] != 'cat') and (cellmodel_par['prot_gene_present'] or key[2:] != 'prot')):
+                if ((model_par['cat_gene_present'] or key[2:] != 'cat') and (model_par['prot_gene_present'] or key[2:] != 'prot')):
                     modules_name2pos[key] = modules_name2pos[key] + 2 * len(module1_genes)
             # module 1 k values kept as they are
             elif((key[0:2]=='k_') and (key in module1_name2pos)):
@@ -202,7 +202,7 @@ class CellModelAuxiliary:
             module2_v_with_F_calc = None
 
         # add the geetic module and controller ODEs (as well as control action calculator) to that of the host cell model
-        cellmodel_ode = lambda t, x, us, args: odeuus(t, x, us,
+        model_ode = lambda t, x, us, args: odeuus(t, x, us,
                                                       module1_ode_with_F_calc, module2_ode_with_F_calc,
                                                       module1_specterms, module2_specterms,
                                                       controller_ode, controller_action,
@@ -210,11 +210,11 @@ class CellModelAuxiliary:
 
         # return updated ode and parameter, initial conditions, circuit gene (and miscellaneous specie) names
         # name - position in state vector decoder and colours for plotting the circuit's time evolution
-        return (cellmodel_ode,
+        return (model_ode,
                 module1_F_calc, module2_F_calc,
                 module1_specterms, module2_specterms,
                 controller_action, controller_update,
-                cellmodel_par, cellmodel_init_conds, controller_init_memory,
+                model_par, model_init_conds, controller_init_memory,
                 (synth_genes, module1_genes, module2_genes),
                 (synth_miscs, module1_miscs, module2_miscs),
                 controller_memos, controller_dynvars, controller_ctrledvar,
@@ -224,7 +224,7 @@ class CellModelAuxiliary:
     
     # add reference tracker to the cell model
     def add_reference_switcher(self,
-                              cellmodel_par, # cell model parameters
+                              model_par, # cell model parameters
                               reference_switcher_initialiser, # function initialising the reference tracker
                               reference_switcher_switcher # function switching to next reference when it is time to do so
                               ):
@@ -232,10 +232,10 @@ class CellModelAuxiliary:
         reference_switcher_par = reference_switcher_initialiser()
         
         # update cell model parameters
-        cellmodel_par.update(reference_switcher_par)
+        model_par.update(reference_switcher_par)
         
         # return
-        return (cellmodel_par, reference_switcher_switcher)
+        return (model_par, reference_switcher_switcher)
 
     # package synthetic gene parameters into jax arrays for calculating k values
     def synth_gene_params_for_jax(self, par,  # system parameters
@@ -1436,12 +1436,12 @@ def main():
     jax.config.update("jax_enable_x64", True)
 
     # initialise cell model
-    cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
-    cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
-    init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
+    model_auxil = ModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
+    model_par = model_auxil.default_params()  # get default parameter values
+    init_conds = model_auxil.default_init_conds(model_par)  # get default initial conditions
     
     # add reference tracker switcher
-    cellmodel_par_with_refswitch, ref_switcher = cellmodel_auxil.add_reference_switcher(cellmodel_par,   # cell model parameters
+    model_par_with_refswitch, ref_switcher = model_auxil.add_reference_switcher(model_par,   # cell model parameters
                                                                                    refsws.timed_switching_initialise,    # function initialising the reference switcher
                                                                                    refsws.timed_switching_switch   # function switching the references to be tracked
                                                                                    )
@@ -1455,7 +1455,7 @@ def main():
         synth_genes_total_and_each, synth_miscs_total_and_each, \
         controller_memos, controller_dynvars, controller_ctrledvar,\
         modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
-        module1_v_with_F_calc, module2_v_with_F_calc) = cellmodel_auxil.add_modules_and_controller(
+        module1_v_with_F_calc, module2_v_with_F_calc) = model_auxil.add_modules_and_controller(
             # module 1
             gms.constfp_initialise,  # function initialising the circuit
             gms.constfp_ode,  # function defining the circuit ODEs
@@ -1477,7 +1477,7 @@ def main():
             # ctrls.cci_ode,  # function defining the controller ODEs
             # ctrls.cci_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
-            cellmodel_par_with_refswitch, init_conds)
+            model_par_with_refswitch, init_conds)
 
     # unpack the synthetic genes and miscellaneous species lists
     synth_genes= synth_genes_total_and_each[0]
@@ -1543,7 +1543,7 @@ def main():
                                  odeuus_complete,    # ODE function for the cell with the synthetic gene circuit and the controller (also gives calculated and experienced control actions)
                                  controller_ctrledvar,    # name of the variable read and steered by the controller
                                  controller_update, controller_action,   # function for updating the controller memory and calculating the control action
-                                 cellmodel_auxil.x0_from_init_conds(init_conds,
+                                 model_auxil.x0_from_init_conds(init_conds,
                                                                     par,
                                                                     synth_genes, synth_miscs, controller_dynvars,
                                                                     modules_name2pos,
@@ -1553,7 +1553,7 @@ def main():
                                  (len(synth_genes), len(module1_genes), len(module2_genes)),    # number of synthetic genes
                                  (len(synth_miscs), len(module1_miscs), len(module2_miscs)),    # number of miscellaneous species
                                  modules_name2pos, controller_name2pos, # dictionaries mapping gene names to their positions in the state vector
-                                 cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes),   # synthetic gene parameters in jax.array form
+                                 model_auxil.synth_gene_params_for_jax(par, synth_genes),   # synthetic gene parameters in jax.array form
                                  tf, meastimestep,  # simulation time frame and measurement time step
                                  control_delay,  # delay before control action reaches the system
                                  us_size,  # size of the control action record needed
@@ -1571,15 +1571,15 @@ def main():
     
     # make plots
     # PLOT - HOST CELL MODEL
-    bkplot.output_file(filename="cellmodel_sim.html",
+    bkplot.output_file(filename="model_sim.html",
                        title="Cell Model Simulation")  # set up bokeh output file
-    mass_fig = cellmodel_auxil.plot_protein_masses(ts, xs, par, synth_genes, synth_miscs, modules_name2pos)  # plot simulation results
-    nat_mrna_fig, nat_prot_fig, nat_trna_fig, h_fig = cellmodel_auxil.plot_native_concentrations(ts, xs,
+    mass_fig = model_auxil.plot_protein_masses(ts, xs, par, synth_genes, synth_miscs, modules_name2pos)  # plot simulation results
+    nat_mrna_fig, nat_prot_fig, nat_trna_fig, h_fig = model_auxil.plot_native_concentrations(ts, xs,
                                                                                                  par,
                                                                                                  synth_genes,
                                                                                                  synth_miscs,
                                                                                                  modules_name2pos)  # plot simulation results
-    l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure = cellmodel_auxil.plot_phys_variables(ts,
+    l_figure, e_figure, Fr_figure, ppGpp_figure, nu_figure, D_figure = model_auxil.plot_phys_variables(ts,
                                                                                                            xs,
                                                                                                            par,
                                                                                                            synth_genes,
@@ -1594,12 +1594,12 @@ def main():
     bkplot.output_file(filename="circuit_sim.html",
                        title="Synthetic Circuit Simulation")  # set up bokeh output file
     # plot synthetic circuit concentrations
-    mRNA_fig, prot_fig, misc_fig = cellmodel_auxil.plot_circuit_concentrations(ts, xs,
+    mRNA_fig, prot_fig, misc_fig = model_auxil.plot_circuit_concentrations(ts, xs,
                                                                               par, synth_genes, synth_miscs,
                                                                               modules_name2pos,
                                                                               modules_styles)  # plot simulation results
     # plot synthetic circuit regulation functions
-    F_fig = cellmodel_auxil.plot_circuit_regulation(ts, xs, # time points and state vectors
+    F_fig = model_auxil.plot_circuit_regulation(ts, xs, # time points and state vectors
                                                     ctrl_memorecord, uexprecord,    # controller memory and experienced control actions records
                                                     refrecord,  # reference tracker records
                                                     module1_F_calc, module2_F_calc, # transcription regulation functions for both modules
@@ -1612,7 +1612,7 @@ def main():
                                                     controller_name2pos, # dictionary mapping controller species to their positions in the state vector
                                                     modules_styles)  # plot simulation results
     # plot controller memory, dynamic variables and actions
-    ctrl_ref_fig, ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = cellmodel_auxil.plot_controller(ts, xs,
+    ctrl_ref_fig, ctrl_memo_fig, ctrl_dynvar_fig, ctrl_u_fig = model_auxil.plot_controller(ts, xs,
                                                                                             ctrl_memorecord, uexprecord, # controller memory and experienced control actions records
                                                                                             refrecord, # reference tracker records
                                                                                             controller_memos, controller_dynvars,
@@ -1626,7 +1626,7 @@ def main():
                                                                                             controller_styles,
                                                                                             u0, control_delay)
     # control action vs controlled variable figure
-    u_vs_ctrledvar_fig = cellmodel_auxil.plot_control_action_vs_controlled_var(ts, xs,
+    u_vs_ctrledvar_fig = model_auxil.plot_control_action_vs_controlled_var(ts, xs,
                                                              ctrl_memorecord, uexprecord, # controller memory and experienced control actions records
                                                              refrecord, # reference tracker records
                                                              refs,

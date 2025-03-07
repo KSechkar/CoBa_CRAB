@@ -17,7 +17,7 @@ import time
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
 from sim_tools.cell_model import *
-import sim_tools.genetic_modules as gms
+import sim_tools.cell_genetic_modules as gms
 import sim_tools.controllers as ctrls
 import sim_tools.reference_switchers as refsws
 import sim_tools.ode_solvers as odesols
@@ -200,12 +200,12 @@ def chi_calc(d, e, h, par, xi_prot, xi_r):
 # get the steady-state translation elongation rate and ribosomal gene transcription function for a given medium nutrient quality
 def get_ss_F_and_e(nutr_qual):
     # initialise cell model
-    cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
-    cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
-    init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
+    model_auxil = ModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
+    model_par = model_auxil.default_params()  # get default parameter values
+    init_conds = model_auxil.default_init_conds(model_par)  # get default initial conditions
 
     # add reference tracker switcher
-    cellmodel_par_with_refswitch, ref_switcher = cellmodel_auxil.add_reference_switcher(cellmodel_par,
+    model_par_with_refswitch, ref_switcher = model_auxil.add_reference_switcher(model_par,
                                                                                         # cell model parameters
                                                                                         refsws.no_switching_initialise,
                                                                                         # function initialising the reference switcher
@@ -222,7 +222,7 @@ def get_ss_F_and_e(nutr_qual):
         synth_genes_total_and_each, synth_miscs_total_and_each, \
         controller_memos, controller_dynvars, controller_ctrledvar, \
         modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
-        module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
+        module1_v_with_F_calc, module2_v_with_F_calc = model_auxil.add_modules_and_controller(
             # module 1
             gms.sas_initialise,  # function initialising the circuit
             gms.sas_ode,  # function defining the circuit ODEs
@@ -239,7 +239,7 @@ def get_ss_F_and_e(nutr_qual):
             ctrls.cci_ode,  # function defining the controller ODEs
             ctrls.cci_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
-            cellmodel_par_with_refswitch, init_conds)
+            model_par_with_refswitch, init_conds)
 
     # unpack the synthetic genes and miscellaneous species lists
     synth_genes = synth_genes_total_and_each[0]
@@ -264,7 +264,7 @@ def get_ss_F_and_e(nutr_qual):
     u0 = 0.0  # initial control action
 
     # get the jaxed synthetic gene parameters
-    sgp4j=cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes)
+    sgp4j=model_auxil.synth_gene_params_for_jax(par, synth_genes)
 
     # DETERMINISTIC SIMULATION
     # set simulation parameters
@@ -290,7 +290,7 @@ def get_ss_F_and_e(nutr_qual):
                                 controller_ctrledvar,  # name of the variable read and steered by the controller
                                 controller_update, controller_action,
                                 # function for updating the controller memory and calculating the control action
-                                cellmodel_auxil.x0_from_init_conds(init_conds,
+                                model_auxil.x0_from_init_conds(init_conds,
                                                                    par,
                                                                    synth_genes, synth_miscs, controller_dynvars,
                                                                    modules_name2pos,
@@ -320,7 +320,7 @@ def get_ss_F_and_e(nutr_qual):
 
     # LOOK AT THE STEADY STATE
     # get steady-state translation elongation rate and ribosomal gene transcription function
-    es, _, F_rs, _, _, _, _ = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
+    es, _, F_rs, _, _, _, _ = model_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
                                                                     synth_genes, synth_miscs,
                                                                     modules_name2pos,
                                                                     module1_specterms, module2_specterms)
@@ -339,10 +339,10 @@ def find_qs_and_chis(
         synth_genes,  # list of synthetic genes
         modules_name2pos,  # dictionary mapping gene names to their positions in the state vector
     ):
-    cellmodel_auxil = CellModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
+    model_auxil = ModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
 
     # get the jaxed synthetic gene parameters
-    sgp4j = cellmodel_auxil.synth_gene_params_for_jax(par, synth_genes)
+    sgp4j = model_auxil.synth_gene_params_for_jax(par, synth_genes)
 
     # get the apparent ribosome-mRNA dissociation constants
     k_a = k_calc(e_ss, par['k+_a'], par['k-_a'], par['n_a'])  # metabolic genes

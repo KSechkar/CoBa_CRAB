@@ -17,7 +17,7 @@ import time
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
 from sim_tools.cell_model import *
-import sim_tools.genetic_modules as gms
+import sim_tools.cell_genetic_modules as gms
 import sim_tools.controllers as ctrls
 import sim_tools.reference_switchers as refsws
 import sim_tools.ode_solvers as odesols

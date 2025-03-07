@@ -235,74 +235,148 @@ def make_interpolator_sp_clt(mapping_data,  # experimental data for mapping reco
     return interpolator
 
 
+# DOUBLE-HILL FUNCTION FITTING
+# return an interpolation function for a mapping from data
+def make_interpolator_dhf(mapping_data,  # experimental data for mapping reconstruction
+                          tol=1e-6  # tolerance for fitting the double-Hill function
+                          ):
+    # unpack the experimental data for mapping reconstruction
+    u_data = np.array(mapping_data[0])
+    y_data = np.array(mapping_data[1])
+    Q_data = np.array(mapping_data[2])
+
+    # make an initial guess for the parameters
+    Y_init = np.max(y_data) # overall maximum output - set to the maximum measured y value
+    F0_Q_init = 0.5        # baseline Hill function value for Q=0 - set to 0.5 as we don't know if it's Q (increasing y) or Q' (decreasing y)
+    K_Q_init = np.mean(Q_data)         # Half-saturation constant for Q - set to the mean of all measured Q values
+    eta_Q_init = 1.0       # Hill coefficient for Q - set to 1.0 as we don't know the cooperativity
+    F0_u_init = 0.0        # baseline Hill function value for u=0 - set to 0.0, assuming no leaky expression
+    K_u_init = np.mean(u_data)         # Half-saturation constant for u - set to the mean of all measured u values
+    eta_u_init = 1.0       # Hill coefficient for u - set to 1.0 as we don't know the cooperativity
+    params_inits = np.array([Y_init, F0_Q_init, K_Q_init, eta_Q_init, F0_u_init, K_u_init, eta_u_init])
+
+    # define the constraints for the parameters
+    Y_const = (0.0, np.inf) # overall maximum output - must be non-negative
+    F0_Q_const = (0.0, 1.0) # baseline Hill function value for Q=0 - must be between 0 and 1
+    K_Q_const = (1e-6, np.inf) # Half-saturation constant for Q - must be non-negative, but made non-zero to avoid division by zero
+    eta_Q_const = (0.0, np.inf) # Hill coefficient for Q - must be non-negative
+    F0_u_const = (0.0, 1.0) # baseline Hill function value for u=0 - must be between 0 and 1
+    K_u_const = (1e-6, np.inf) # Half-saturation constant for u - must be non-negative, but made non-zero to avoid division by zero
+    eta_u_const = (0.0, np.inf) # Hill coefficient for u - must be non-negative
+    params_consts = (Y_const, F0_Q_const, K_Q_const, eta_Q_const, F0_u_const, K_u_const, eta_u_const)
+
+    # create a cost function for fitting the double-Hill function to the data
+    cost_func_sse = lambda params: double_hill_sse(u_data=u_data,
+                                                   y_data=y_data,
+                                                   Q_data=Q_data,
+                                                   params=params)
+
+    # create an optimiser for fitting
+    fitter = sp.optimize.minimize(fun=cost_func_sse,
+                                  x0=params_inits,
+                                  method='COBYLA',
+                                  bounds=params_consts,
+                                  tol=1e-12
+                                  )
+
+
+    return 0, fitter.x
+
+# function solving the double-Hill equation for Q for given u and y
+def solve_double_hill(u, y, params):
+    # UNPACK PARAMETERS
+    # overall maximum output
+    Y = params[0]
+    # Hill function for Q
+    F0_Q = params[1]    # baseline Hill function value for Q=0
+    K_Q = params[2]     # Half-saturation constant for Q
+    eta_Q = params[3]   # Hill coefficient for Q
+    # Hill function for u
+    F0_u = params[4]    # baseline Hill function value for u=0
+    K_u = params[5]     # Half-saturation constant for u
+    eta_u = params[6]   # Hill coefficient for u
+
+    # calculate the Hill function for u
+    Hill_u = (F0_u + (1 - F0_u) * ((u/K_u) ** eta_u)) / (1 + (u/K_u) ** eta_u)
+
+    return Q
+
+# function returning a sum of squared errors for double-Hill predictionsw vs experimental data
+def double_hill_sse(u_data, y_data, Q_data, params):
+    ys = double_hill(us=u_data, Qs=Q_data, params=params)
+
+    return np.sum(np.square(y_data - ys))
+
+# function yielding double-Hill prediction for y values based on u and Q values
+def double_hill(us, Qs, params):
+    # UNPACK PARAMETERS
+    # overall maximum output
+    Y = params[0]
+    # Hill function for Q
+    F0_Q = params[1]    # baseline Hill function value for Q=0
+    K_Q = params[2]     # Half-saturation constant for Q
+    eta_Q = params[3]   # Hill coefficient for Q
+    # Hill function for u
+    F0_u = params[4]    # baseline Hill function value for u=0
+    K_u = params[5]     # Half-saturation constant for u
+    eta_u = params[6]   # Hill coefficient for u
+
+    # calculate the Hill functions
+    Hills_Q = (F0_Q + (1 - F0_Q) * ((Qs/K_Q) ** eta_Q)) / (1 + (Qs/K_Q) ** eta_Q)
+    Hills_u = (F0_u + (1 - F0_u) * ((us/K_u) ** eta_u)) / (1 + (us/K_u) ** eta_u)
+    ys = Y * Hills_Q * Hills_u
+
+    return ys
+
+
+
+
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------
 def main():
-    u_data=jnp.array([[0, 0, 0],
-                      [1, 1, 2],
-                      [2, 2, 2]], dtype=jnp.float32)
+    Q_probe_data = np.load('Q_probe_data.npy')
 
-    y_data = jnp.array([[0, 0, 1],
-                        [1, 2, 2],
-                        [4, 4, 3]], dtype=jnp.float32).T
+    params=make_interpolator_dhf(Q_probe_data)
+    
+    # unpack the experimental data for mapping reconstruction
+    us = np.array(Q_probe_data[0])
+    y_probes = np.array(Q_probe_data[1])
+    Q_probes = np.array(Q_probe_data[2])
 
-    Q_data = jnp.array([[0, 4, 8],
-                        [6, 12, 24],
-                        [14, 28, 56]], dtype=jnp.float32).T
-
-    # define the u and y values to estimate Q and Q' for
-    u_vals_est = np.linspace(np.min(u_data), np.max(u_data), 5)
-    y_vals_est = np.linspace(np.min(y_data), np.max(y_data), 5)
-
-    # make a mesh grid
-    us_mesh_est = np.zeros((len(u_vals_est), len(y_vals_est)))
-    y_mesh_est = np.zeros((len(u_vals_est), len(y_vals_est)))
-    for i in range(0, len(u_vals_est)):
-        for j in range(0, len(y_vals_est)):
-            us_mesh_est[i, j] = u_vals_est[i]
-            y_mesh_est[i, j] = y_vals_est[j]
-
-    print(us_mesh_est)
-    print(y_mesh_est)
-
-    # create interpolation functions
-    interpolator_Q = make_interpolator_sp_lnd(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
-    interpolator_Qdash = make_interpolator_sp_lnd(np.stack((u_data.ravel(), y_data.ravel(), Q_data.ravel()),axis=0))
-
-    # get the estimates
-    Q_est = np.zeros_like(us_mesh_est)
-    Qdash_est = np.zeros_like(us_mesh_est)
-    for i in range(0, len(us_mesh_est)):
-        for j in range(0, len(y_mesh_est)):
-            Q_est[i, j] = interpolator_Q(u=us_mesh_est[i, j], y=y_mesh_est[i, j])
-            Qdash_est[i, j] = interpolator_Qdash(u=us_mesh_est[i, j], y=y_mesh_est[i, j])
-
-    # FIGURE
-    u_y_to_Q_fig = plt.figure(2)
+    # create a double-Hill interpolator
+    interpolator, params = make_interpolator_dhf(Q_probe_data)
+    
+    y_dhf=double_hill(Q_probes,us,params)
+    
+    # plot the interpolated mapping
+    u_Q_to_y_fig=plt.figure(1)
     plt.clf()
-    u_y_to_Q_ax = u_y_to_Q_fig.add_subplot(111, projection='3d')
+    u_Q_to_y_ax = u_Q_to_y_fig.add_subplot(111, projection='3d')
 
-    # # make a 3D plot of experimentally measured Q values
-    u_y_to_Q_ax.scatter(
-        u_data,
-        y_data,
-        Q_data,
-        c='cyan', label='Measured Q values')
-
-    # make a 3D plot of estimated Q values
-    u_y_to_Q_ax.plot_surface(
-        us_mesh_est,
-        y_mesh_est,
-        Q_est,
-        cmap=mpl.colormaps['plasma'], label='Measured Q values')
+    # make a 3D plot of estimated y values
+    u_Q_to_y_ax.scatter(
+        us,
+        Q_probes,
+        y_dhf,
+        color='red',
+        label='Est y')
+    # make a scatter plot of the measured y values
+    u_Q_to_y_ax.scatter(us,
+                        Q_probes,
+                        y_probes,
+                        color='cyan',
+                        label='Real y')
+    
+    
 
     # format the plot
-    u_y_to_Q_ax.set_title("(u, y_probe) -> Q_probe")
-    u_y_to_Q_ax.set_xlabel('u')
-    u_y_to_Q_ax.set_ylabel('y_probe')
-    u_y_to_Q_ax.set_zlabel('Q_probe')
+    u_Q_to_y_ax.set_title("(u, Q\'_probe) -> Q_probe")
+    u_Q_to_y_ax.set_xlabel('u')
+    u_Q_to_y_ax.set_ylabel('Q\'_probe')
+    u_Q_to_y_ax.set_zlabel('Q_probe')
 
     # show plot
     plt.show()
+    
 
 
 

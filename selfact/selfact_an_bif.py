@@ -35,16 +35,16 @@ def F_real_calc(p_switch,   # switch protein level
 
 
 # required value
-def F_req_calc(p_switch, # switch protein level
-               q_osynth, # burden of other (non-switch) synthetic genes
+def F_reQ_calc(p_switch, # switch protein level
+               Q_osynth, # burden of other (non-switch) synthetic genes
                par, # system parameters
                cellvars # steady-state cellular variables obtained by simulation
                ):
     return p_switch * (1 + cellvars['chi_switch']) * \
-        (1 + q_osynth) / cellvars['q_sas_max'] / \
+        (1 + Q_osynth) / cellvars['Q_sas_max'] / \
         (
                 par['M'] * (1 - par['phi_q']) / par['n_switch'] *
-                (cellvars['q_switch_max'] / cellvars['q_sas_max'])
+                (cellvars['Q_switch_max'] / cellvars['Q_sas_max'])
                 -
                 p_switch * (1 + cellvars['chi_switch'])
         )
@@ -59,17 +59,17 @@ def dFreal_dpswitch_calc(p_switch, par):
 
 
 # required value
-def dFreq_dpswitch_calc(p_switch,   # switch protein level
-                        q_osynth,   # burden of other (non-switch) synthetic genes
+def dFreQ_dpswitch_calc(p_switch,   # switch protein level
+                        Q_osynth,   # burden of other (non-switch) synthetic genes
                         par,        # system parameters
                         cellvars    # steady-state cellular variables obtained by simulation
                         ):
     # Freq = a * p_switch / (b - p_switch) => dFreq/dpswitch = a * b / (b - p_switch) ** 2
 
-    a_coeff = (1 + q_osynth) / cellvars['q_sas_max']
+    a_coeff = (1 + Q_osynth) / cellvars['Q_sas_max']
 
     b_coeff = par['M'] * (1 - par['phi_q']) / ((1 + cellvars['chi_switch']) * par['n_switch']) \
-                * (cellvars['q_switch_max'] / cellvars['q_sas_max'])
+                * (cellvars['Q_switch_max'] / cellvars['Q_sas_max'])
 
     return a_coeff * b_coeff / (b_coeff - p_switch) ** 2
 
@@ -80,14 +80,14 @@ def gradiff_from_F(F,   # value of F_switch
                    par,     # system parameters
                    cellvars     # steady-state cellular variables obtained by simulation
                    ):
-    # reconstruct p_switch and q_osynth
+    # reconstruct p_switch and Q_osynth
     p_switch = pswitch_from_F(F, par)
-    q_osynth = q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
+    Q_osynth = Q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
 
     # get the gradients
     dFreal_dpswitch = dFreal_dpswitch_calc(p_switch, par)
-    dFreq_dpswitch = dFreq_dpswitch_calc(p_switch, q_osynth, par, cellvars)
-    return dFreal_dpswitch - dFreq_dpswitch
+    dFreQ_dpswitch = dFreQ_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
+    return dFreal_dpswitch - dFreQ_dpswitch
 
 
 # difference of gradients at the fixed point for a given value of p_switch
@@ -95,14 +95,14 @@ def gradiff_from_pswitch(p_switch,  # value of p_switch
                          par,    # system parameters
                          cellvars       # steady-state cellular variables obtained by simulation
                          ):
-    # reconstruct F_switch and q_osynth
+    # reconstruct F_switch and Q_osynth
     F = F_real_calc(p_switch, par)
-    q_osynth = q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
+    Q_osynth = Q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
 
     # get the gradients
     dFreal_dpswitch = dFreal_dpswitch_calc(p_switch, par)
-    dFreq_dpswitch = dFreq_dpswitch_calc(p_switch, q_osynth, par, cellvars)
-    return dFreal_dpswitch - dFreq_dpswitch
+    dFreQ_dpswitch = dFreQ_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
+    return dFreal_dpswitch - dFreQ_dpswitch
 
 
 # find p_switch value for a given real value of F_switch
@@ -111,52 +111,52 @@ def pswitch_from_F(F, par):
         ((F - par['baseline_switch']) / (1 - F)) ** (1 / par['eta_switch'])
 
 
-# find the value of q_osynth yielding a fixed point for given F_switch and p_switch values
-def q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars):
-    return F * cellvars['q_sas_max'] / (p_switch * (1 + cellvars['chi_switch'])) * (
-                par['M'] * (1 - par['phi_q']) / par['n_switch'] * cellvars['q_switch_max'] / cellvars['q_sas_max'] - p_switch * (1 + cellvars['chi_switch'])
+# find the value of Q_osynth yielding a fixed point for given F_switch and p_switch values
+def Q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars):
+    return F * cellvars['Q_sas_max'] / (p_switch * (1 + cellvars['chi_switch'])) * (
+                par['M'] * (1 - par['phi_q']) / par['n_switch'] * cellvars['Q_switch_max'] / cellvars['Q_sas_max'] - p_switch * (1 + cellvars['chi_switch'])
             ) - 1
 
 
-# just for convenience, can get a pair of q_osynth and p_switch values
-def pswitch_and_q_osynth_from_F(F, par, cellvars):
+# just for convenience, can get a pair of Q_osynth and p_switch values
+def pswitch_and_Q_osynth_from_F(F, par, cellvars):
     p_switch = pswitch_from_F(F, par)
-    q_osynth = q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
-    return jnp.array([p_switch,q_osynth])
+    Q_osynth = Q_osynth_from_F_and_pswitch(F, p_switch, par, cellvars)
+    return jnp.array([p_switch,Q_osynth])
 
 
-# upper bound for q_osynth to find the saddle point at the lower bifurcation (inflexion in real F_switch values)
+# upper bound for Q_osynth to find the saddle point at the lower bifurcation (inflexion in real F_switch values)
 def pswitch_inflexion_in_Freal(par):
     return ((par['eta_switch'] - 1) / (par['eta_switch'] + 1)) ** (1 / par['eta_switch']) * (
                 par['K_switch'] / par['I_switch'])
 
 # FINDING THE STEADY STATES: AUXILIARIES FOR THE PARAMETRIC APPROACH ---------------------------------------------------
 # difference of Freal and Freq for a given p_switch value
-def diff_from_pswitch(pswitch, q_osynth, par, cellvars):
+def diff_from_pswitch(pswitch, Q_osynth, par, cellvars):
     # get the F values
     F_real = F_real_calc(pswitch, par)
-    F_req = F_req_calc(pswitch, q_osynth, par, cellvars)
+    F_req = F_reQ_calc(pswitch, Q_osynth, par, cellvars)
     return F_real - F_req
 
 
 # CALCULATING OUTPUT FLUORESCENT PROTEIN LEVELS ------------------------------------------------------------------------
 # calculate the total output fluorescent protein level for a given p_switch value
-def p_ofp_tot_from_p_switch_and_q_osynth(p_switch, q_osynth,
+def p_ofp_tot_from_p_switch_and_Q_osynth(p_switch, Q_osynth,
                                      par, cellvars):
     # get the F value
     F = F_real_calc(p_switch, par)
 
     return 1 / (1 + cellvars['chi_ofp']) * \
         par['M'] * (1 - par['phi_q']) / par['n_ofp'] * \
-        (F * cellvars['q_ofp_max']) / (1 + q_osynth + F*cellvars['q_sas_max'])
+        (F * cellvars['Q_ofp_max']) / (1 + Q_osynth + F*cellvars['Q_sas_max'])
 
 # calculate the immature and mature output fluorescent protein levels for a given total value
-def p_ofp_immat_mat(p_switch, q_osynth, par, cellvars):
+def p_ofp_immat_mat(p_switch, Q_osynth, par, cellvars):
     # get the F value
     F = F_real_calc(p_switch, par)
 
     # get the ribosome abundance
-    R = par['M'] * ((1 - par['phi_q'])/par['n_r']) * (cellvars['q_r']/(1+q_osynth+ F*cellvars['q_sas_max']))
+    R = par['M'] * ((1 - par['phi_q'])/par['n_r']) * (cellvars['Q_r']/(1+Q_osynth+ F*cellvars['Q_sas_max']))
 
     # get the cell growth rate
     l = R*cellvars['e']/par['M']
@@ -166,7 +166,7 @@ def p_ofp_immat_mat(p_switch, q_osynth, par, cellvars):
 
     # get the rate of p_ofp synthesis
     synth_rate = R * cellvars['e'] * (1 - par['phi_q']) / par['n_ofp'] * \
-                 F * cellvars['q_ofp_max'] / (1 + q_osynth + F * cellvars['q_sas_max'])
+                 F * cellvars['Q_ofp_max'] / (1 + Q_osynth + F * cellvars['Q_sas_max'])
 
     # get the immature p_ofp level
     p_ofp = synth_rate/(removal_rate+par['mu_ofp'])
@@ -181,7 +181,7 @@ def p_ofp_immat_mat(p_switch, q_osynth, par, cellvars):
 def find_p_switch_sup(par, cellvars):
     return 1 / (1 + cellvars['chi_switch']) * \
         par['M'] * (1 - par['phi_q']) / par['n_switch'] * \
-        cellvars['q_switch_max'] / (1+cellvars['q_sas_max'])
+        cellvars['Q_switch_max'] / (1+cellvars['Q_sas_max'])
 
 
 # FIND STEADY-STATE CELLULAR VARIABLES BY SIMULATION -------------------------------------------------------------------
@@ -368,15 +368,15 @@ def find_qs_and_chis(
                                   1,    # for maximum burden, maximum transcription regulation function value is used, i.e. F=1
                                   par['c_' + gene], par['a_' + gene],
                                   k_het[modules_name2pos['k_' + gene]])
-        qmaxs['q_'+gene+'_max'] = xi_gene_max / xi_native  # record the normalised maximum burden value
+        qmaxs['Q_'+gene+'_max'] = xi_gene_max / xi_native  # record the normalised maximum burden value
         chis['chi_'+gene] = chi_calc(par['d_' + gene], e_ss,
                                          0, # assuming no chloramphenicol present
                                          par, xi_gene_max, xi_native)  # record the degradation coefficient
 
     # knowing normalised burden values q is also useful for native genes => retrieve
     qs_native = {}
-    qs_native['q_a']=xi_a/xi_native
-    qs_native['q_r']=xi_r/xi_native
+    qs_native['Q_a']=xi_a/xi_native
+    qs_native['Q_r']=xi_r/xi_native
 
     # return
     return qmaxs, qs_native, chis
@@ -406,46 +406,46 @@ def find_bifurcations(par, cellvars):
                                              check_bracket=False)  # required for vmapping and jitting
     F_bif_Freqabove = Freqabove_bif_problem.run(par=par, cellvars=cellvars).params  # F_switch value at the bifurcation
 
-    # get associated p_switch, p_ofp_tot, q_sas and q_osynth values
+    # get associated p_switch, p_ofp_tot, Q_sas and Q_osynth values
     # touch-below bifurcation
     p_switch_bif_Freqbelow = pswitch_from_F(F_bif_Freqbelow, par)  # p_switch value at the bifurcation
-    q_osynth_bif_Freqbelow = q_osynth_from_F_and_pswitch(F_bif_Freqbelow,
+    Q_osynth_bif_Freqbelow = Q_osynth_from_F_and_pswitch(F_bif_Freqbelow,
                                                          p_switch_bif_Freqbelow,
-                                                         par, cellvars)  # q_osynth value enabling the bifurcation
-    p_ofp_tot_bif_Freqbelow = p_ofp_tot_from_p_switch_and_q_osynth(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars)  # p_ofp value at the bifurcation
-    q_sas_bif_Freqbelow = cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqbelow, par)  # q_sas value at the bifurcation
+                                                         par, cellvars)  # Q_osynth value enabling the bifurcation
+    p_ofp_tot_bif_Freqbelow = p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_bif_Freqbelow, Q_osynth_bif_Freqbelow, par, cellvars)  # p_ofp value at the bifurcation
+    Q_sas_bif_Freqbelow = cellvars['Q_sas_max']*F_real_calc(p_switch_bif_Freqbelow, par)  # Q_sas value at the bifurcation
     # touch-above bifurcation
     p_switch_bif_Freqabove = pswitch_from_F(F_bif_Freqabove, par)  # p_switch value at the bifurcation
-    q_osynth_bif_Freqabove = q_osynth_from_F_and_pswitch(F_bif_Freqabove,
+    Q_osynth_bif_Freqabove = Q_osynth_from_F_and_pswitch(F_bif_Freqabove,
                                                          p_switch_bif_Freqabove,
-                                                         par, cellvars)  # q_osynth value enabling the bifurcation
-    p_ofp_tot_bif_Freqabove = p_ofp_tot_from_p_switch_and_q_osynth(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars)  # p_ofp value at the bifurcation
-    q_sas_bif_Freqabove = cellvars['q_sas_max']*F_real_calc(p_switch_bif_Freqabove, par)  # q_sas value at the bifurcation
+                                                         par, cellvars)  # Q_osynth value enabling the bifurcation
+    p_ofp_tot_bif_Freqabove = p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_bif_Freqabove, Q_osynth_bif_Freqabove, par, cellvars)  # p_ofp value at the bifurcation
+    Q_sas_bif_Freqabove = cellvars['Q_sas_max']*F_real_calc(p_switch_bif_Freqabove, par)  # Q_sas value at the bifurcation
 
     # return
     return (
-        {'F': F_bif_Freqbelow, 'p_switch': p_switch_bif_Freqbelow, 'q_osynth': q_osynth_bif_Freqbelow,
-            'p_ofp': p_ofp_tot_bif_Freqbelow, 'q_sas': q_sas_bif_Freqbelow},
-        {'F': F_bif_Freqabove, 'p_switch': p_switch_bif_Freqabove, 'q_osynth': q_osynth_bif_Freqabove,
-            'p_ofp': p_ofp_tot_bif_Freqabove, 'q_sas': q_sas_bif_Freqabove}
+        {'F': F_bif_Freqbelow, 'p_switch': p_switch_bif_Freqbelow, 'Q_osynth': Q_osynth_bif_Freqbelow,
+            'p_ofp': p_ofp_tot_bif_Freqbelow, 'Q_sas': Q_sas_bif_Freqbelow},
+        {'F': F_bif_Freqabove, 'p_switch': p_switch_bif_Freqabove, 'Q_osynth': Q_osynth_bif_Freqabove,
+            'p_ofp': p_ofp_tot_bif_Freqabove, 'Q_sas': Q_sas_bif_Freqabove}
     )
 
 
 # FINDING THE EQUILIIBRIA ----------------------------------------------------------------------------------------------
-# find equilibria for the given q_osynth values
-def find_equilibria_for_q_osynth_range(q_osynth_range, # range of burdens from other genes to consider
+# find equilibria for the given Q_osynth values
+def find_equilibria_for_Q_osynth_range(Q_osynth_range, # range of burdens from other genes to consider
                                        bifurcation_Freqbelow, bifurcation_Freqabove,    # bifurcation points
                                        par, cellvars):  # system parameters and steady-state cellular variables
-    # get p_switch and q_osynth values at the bifurcation points
+    # get p_switch and Q_osynth values at the bifurcation points
     p_switch_bif_Freqbelow = bifurcation_Freqbelow['p_switch']
-    q_osynth_bif_Freqbelow = bifurcation_Freqbelow['q_osynth']
+    Q_osynth_bif_Freqbelow = bifurcation_Freqbelow['Q_osynth']
     p_switch_bif_Freqabove = bifurcation_Freqabove['p_switch']
-    q_osynth_bif_Freqabove = bifurcation_Freqabove['q_osynth']
+    Q_osynth_bif_Freqabove = bifurcation_Freqabove['Q_osynth']
 
     # initialise lists to record the bifurcation curve points in
-    bifurcation_curve_q_osynth = []
+    bifurcation_curve_Q_osynth = []
     bifurcation_curve_p_switch = []
-    bifurcation_curve_q_sas = []
+    bifurcation_curve_Q_sas = []
     bifurcation_curve_p_ofp_tot = []
     bifurcation_curve_p_ofp = [] # immature ofp
     bifurcation_curve_ofp_mature = [] # mature ofp
@@ -453,84 +453,84 @@ def find_equilibria_for_q_osynth_range(q_osynth_range, # range of burdens from o
     # get the highest-possible p_switch value
     p_switch_sup = find_p_switch_sup(par, cellvars)
 
-    # get high-expression equilibria for q_osynth values where they are possible
-    for q_osynth in q_osynth_range:
+    # get high-expression equilibria for Q_osynth values where they are possible
+    for Q_osynth in Q_osynth_range:
         # check if the high-expression equilibrium is possible
-        if (q_osynth < q_osynth_bif_Freqabove):
+        if (Q_osynth < Q_osynth_bif_Freqabove):
             # at high-expression equilibiria, p_switch is above the touch-above bifurcation value
             hieq_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
                                             lower=p_switch_bif_Freqabove, upper=p_switch_sup,
                                             maxiter=10000, tol=1e-18,
                                             check_bracket=False)  # required for vmapping and jitting
-            p_switch_hieq = hieq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+            p_switch_hieq = hieq_problem.run(Q_osynth=Q_osynth, par=par, cellvars=cellvars).params
 
             # record the high-expression equilibrium
-            bifurcation_curve_q_osynth.append(q_osynth)
+            bifurcation_curve_Q_osynth.append(Q_osynth)
             bifurcation_curve_p_switch.append(p_switch_hieq)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_hieq, par))
-            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_q_osynth(p_switch_hieq, q_osynth, par, cellvars))
-            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_hieq, q_osynth, par, cellvars)
+            bifurcation_curve_Q_sas.append(cellvars['Q_sas_max'] * F_real_calc(p_switch_hieq, par))
+            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_hieq, Q_osynth, par, cellvars))
+            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_hieq, Q_osynth, par, cellvars)
             bifurcation_curve_p_ofp.append(p_ofp)
             bifurcation_curve_ofp_mature.append(ofp_mature)
 
     # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(q_osynth_bif_Freqabove)
+    bifurcation_curve_Q_osynth.append(Q_osynth_bif_Freqabove)
     bifurcation_curve_p_switch.append(p_switch_bif_Freqabove)
-    bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_bif_Freqabove, par))
-    bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_q_osynth(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars))
-    p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_bif_Freqabove, q_osynth_bif_Freqabove, par, cellvars)
+    bifurcation_curve_Q_sas.append(cellvars['Q_sas_max'] * F_real_calc(p_switch_bif_Freqabove, par))
+    bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_bif_Freqabove, Q_osynth_bif_Freqabove, par, cellvars))
+    p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_bif_Freqabove, Q_osynth_bif_Freqabove, par, cellvars)
     bifurcation_curve_p_ofp.append(p_ofp)
     bifurcation_curve_ofp_mature.append(ofp_mature)
 
-    # get the saddle point for q_osynth values where they are possible
-    for q_osynth in np.flip(q_osynth_range):  # range flipped for continuity of the curve
+    # get the saddle point for Q_osynth values where they are possible
+    for Q_osynth in np.flip(Q_osynth_range):  # range flipped for continuity of the curve
         # check if the saddle point is possible
-        if (q_osynth > q_osynth_bif_Freqbelow and q_osynth < q_osynth_bif_Freqabove):
+        if (Q_osynth > Q_osynth_bif_Freqbelow and Q_osynth < Q_osynth_bif_Freqabove):
             # at saddle points, p_switch is below the touch-below bifurcation value
             sp_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
                                           lower=p_switch_bif_Freqbelow, upper=p_switch_bif_Freqabove,
                                           maxiter=10000, tol=1e-18,
                                           check_bracket=False)
-            p_switch_sp = sp_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
-            bifurcation_curve_q_osynth.append(q_osynth)
+            p_switch_sp = sp_problem.run(Q_osynth=Q_osynth, par=par, cellvars=cellvars).params
+            bifurcation_curve_Q_osynth.append(Q_osynth)
             bifurcation_curve_p_switch.append(p_switch_sp)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_sp, par))
-            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_q_osynth(p_switch_sp, q_osynth, par, cellvars))
-            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_sp, q_osynth, par, cellvars)
+            bifurcation_curve_Q_sas.append(cellvars['Q_sas_max'] * F_real_calc(p_switch_sp, par))
+            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_sp, Q_osynth, par, cellvars))
+            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_sp, Q_osynth, par, cellvars)
             bifurcation_curve_p_ofp.append(p_ofp)
             bifurcation_curve_ofp_mature.append(ofp_mature)
 
     # add the touch-above bifurcation point
-    bifurcation_curve_q_osynth.append(q_osynth_bif_Freqbelow)
+    bifurcation_curve_Q_osynth.append(Q_osynth_bif_Freqbelow)
     bifurcation_curve_p_switch.append(p_switch_bif_Freqbelow)
-    bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_bif_Freqbelow, par))
-    bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_q_osynth(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars))
-    p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_bif_Freqbelow, q_osynth_bif_Freqbelow, par, cellvars)
+    bifurcation_curve_Q_sas.append(cellvars['Q_sas_max'] * F_real_calc(p_switch_bif_Freqbelow, par))
+    bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_bif_Freqbelow, Q_osynth_bif_Freqbelow, par, cellvars))
+    p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_bif_Freqbelow, Q_osynth_bif_Freqbelow, par, cellvars)
     bifurcation_curve_p_ofp.append(p_ofp)
     bifurcation_curve_ofp_mature.append(ofp_mature)
 
-    # get the low-expression equilibria for q_osynth values where they are possible
-    for q_osynth in q_osynth_range:  # range NOT flipped for continuity of the curve
+    # get the low-expression equilibria for Q_osynth values where they are possible
+    for Q_osynth in Q_osynth_range:  # range NOT flipped for continuity of the curve
         # check if the low-expression equilibrium is possible
-        if (q_osynth > q_osynth_bif_Freqbelow):
+        if (Q_osynth > Q_osynth_bif_Freqbelow):
             # at low-expression equilibiria, p_switch is below the touch-below bifurcation value
-            leeq_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
+            leeQ_problem = jaxopt.Bisection(optimality_fun=diff_from_pswitch,
                                             lower=0, upper=p_switch_bif_Freqbelow,
                                             maxiter=10000, tol=1e-18,
                                             check_bracket=False)
-            p_switch_leeq = leeq_problem.run(q_osynth=q_osynth, par=par, cellvars=cellvars).params
+            p_switch_leeq = leeQ_problem.run(Q_osynth=Q_osynth, par=par, cellvars=cellvars).params
             # record the low-expression equilibrium
-            bifurcation_curve_q_osynth.append(q_osynth)
+            bifurcation_curve_Q_osynth.append(Q_osynth)
             bifurcation_curve_p_switch.append(p_switch_leeq)
-            bifurcation_curve_q_sas.append(cellvars['q_sas_max'] * F_real_calc(p_switch_leeq, par))
-            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_q_osynth(p_switch_leeq, q_osynth, par, cellvars))
-            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_leeq, q_osynth, par, cellvars)
+            bifurcation_curve_Q_sas.append(cellvars['Q_sas_max'] * F_real_calc(p_switch_leeq, par))
+            bifurcation_curve_p_ofp_tot.append(p_ofp_tot_from_p_switch_and_Q_osynth(p_switch_leeq, Q_osynth, par, cellvars))
+            p_ofp, ofp_mature = p_ofp_immat_mat(p_switch_leeq, Q_osynth, par, cellvars)
             bifurcation_curve_p_ofp.append(p_ofp)
             bifurcation_curve_ofp_mature.append(ofp_mature)
 
     # return
-    return {'p_switch': np.array(bifurcation_curve_p_switch), 'q_osynth': np.array(bifurcation_curve_q_osynth),
-            'p_ofp_total': np.array(bifurcation_curve_p_ofp_tot), 'q_sas': np.array(bifurcation_curve_q_sas),
+    return {'p_switch': np.array(bifurcation_curve_p_switch), 'Q_osynth': np.array(bifurcation_curve_Q_osynth),
+            'p_ofp_total': np.array(bifurcation_curve_p_ofp_tot), 'Q_sas': np.array(bifurcation_curve_Q_sas),
             'p_ofp': np.array(bifurcation_curve_p_ofp), 'ofp_mature': np.array(bifurcation_curve_ofp_mature)}
 
 

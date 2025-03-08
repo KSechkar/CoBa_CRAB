@@ -23,40 +23,40 @@ import sim_tools.reference_switchers as refsws
 import sim_tools.ode_solvers as odesols
 
 # FIND OUTPUT CORRESPONDING TO A GIVEN BURDEN EXERTED BY A SWITCH ------------------------------------------------------
-def q_sas_to_ofp_mature(q_sas_query,        # burden for which the output is to be found
-                        q_sass_bifcurve,    # bifurcation curve points: burden
+def Q_sas_to_ofp_mature(Q_sas_query,        # burden for which the output is to be found
+                        Q_sass_bifcurve,    # bifurcation curve points: burden
                         ofps_bifcurve       # bifurcation curve points: output
                         ):
-    # for np.interp to work properly, q_sass_bifcurve must be in ascending order
-    if(q_sass_bifcurve[-1]>=q_sass_bifcurve[0]):
-        return np.interp(q_sas_query, q_sass_bifcurve, ofps_bifcurve)
+    # for np.interp to work properly, Q_sass_bifcurve must be in ascending order
+    if(Q_sass_bifcurve[-1]>=Q_sass_bifcurve[0]):
+        return np.interp(Q_sas_query, Q_sass_bifcurve, ofps_bifcurve)
     else:
-        return np.interp(q_sas_query, np.flip(q_sass_bifcurve), np.flip(ofps_bifcurve))
+        return np.interp(Q_sas_query, np.flip(Q_sass_bifcurve), np.flip(ofps_bifcurve))
 
 
 # FIND INTERSECTIONS OF BIFURCATION CURVES -----------------------------------------------------------------------------
 # find the intersection of two bifurcation curves
-def bifcurves_intersection(q_sas1s_1,  # bifurcation curve for switch 1: burden imposed by itself
-                           q_sas2s_1,  # bifurcation curve for switch 1: burden experienced by it due to switch 2
-                           q_sas1s_2,  # bifurcation curve for switch 2: burden experienced by it due to switch 1
-                           q_sas2s_2,  # bifurcation curve for switch 2: burden imposed by itself
+def bifcurves_intersection(Q_sas1s_1,  # bifurcation curve for switch 1: burden imposed by itself
+                           Q_sas2s_1,  # bifurcation curve for switch 1: burden experienced by it due to switch 2
+                           Q_sas1s_2,  # bifurcation curve for switch 2: burden experienced by it due to switch 1
+                           Q_sas2s_2,  # bifurcation curve for switch 2: burden imposed by itself
                            ):
     # initialise the storage of intersection points
-    intersection_q_sas1s = []
-    intersection_q_sas2s = []
+    intersection_Q_sas1s = []
+    intersection_Q_sas2s = []
     # for each pair of bifurcation curve segments, find if they intersect and where
-    for i in range(0,len(q_sas1s_1)-1):
-        for j in range(0,len(q_sas1s_2)-1):
-            t, u, intersection_point = segments_intersection(q_sas1s_1[i], q_sas2s_1[i],
-                                                             q_sas1s_1[i + 1], q_sas2s_1[i + 1],
-                                                             q_sas1s_2[j], q_sas2s_2[j],
-                                                             q_sas1s_2[j + 1], q_sas2s_2[j + 1])
+    for i in range(0,len(Q_sas1s_1)-1):
+        for j in range(0,len(Q_sas1s_2)-1):
+            t, u, intersection_point = segments_intersection(Q_sas1s_1[i], Q_sas2s_1[i],
+                                                             Q_sas1s_1[i + 1], Q_sas2s_1[i + 1],
+                                                             Q_sas1s_2[j], Q_sas2s_2[j],
+                                                             Q_sas1s_2[j + 1], Q_sas2s_2[j + 1])
             if((0<=t and t<=1) and (0<=u and u<=1)):
-                intersection_q_sas1s.append(intersection_point[0])
-                intersection_q_sas2s.append(intersection_point[1])
+                intersection_Q_sas1s.append(intersection_point[0])
+                intersection_Q_sas2s.append(intersection_point[1])
 
     # return the intersection point coordinates in numpy array format
-    return np.array(intersection_q_sas1s), np.array(intersection_q_sas2s)
+    return np.array(intersection_Q_sas1s), np.array(intersection_Q_sas2s)
 
 
 # find intersection of two line segements (actually exists if 0<=t<=1)

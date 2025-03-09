@@ -13,13 +13,83 @@ import numpy as np
 # initialise all the necessary parameters to simulate the circuit
 # return the default parameters and initial conditions, species name to ODE vector position decoder and plot colour palette
 def nocircuit_initialise():
-    default_par={'cat_gene_present':0, 'prot_gene_present':0} # chloramphenicol resistance or synthetic protease gene not present, natrually
-    default_init_conds={}
-    genes={}
-    miscs={}
-    name2pos={'p_cat':0, } # placeholders, will never be used but required for correct execution'}
-    circuit_colours={}
-    return default_par, default_init_conds, genes, miscs, name2pos, circuit_colours
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    genes = []  # names of genes in the circuit: output fluorescent protein
+    miscs = []  # names of miscellaneous species involved in the circuit (e.g. metabolites)
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['m_' + genes[i]] = 8 + i  # mRNA
+        name2pos['p_' + genes[i]] = 8 + len(genes) + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) * 2 + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['k_' + genes[i]] = i  # effective mRNA-ribosome dissociation constants (in k_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['s_' + genes[i]] = i  # mRNA count scaling factors (in mRNA_count_scales, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes:  # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['c_' + gene] = 1.0  # copy no. (nM)
+        default_par['a_' + gene] = 100.0  # promoter strength (unitless)
+        default_par['b_' + gene] = 6.0  # mRNA decay rate (/h)
+        default_par['k+_' + gene] = 60.0  # ribosome binding rate (/h/nM)
+        default_par['k-_' + gene] = 60.0  # ribosome unbinding rate (/h)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par[
+            'd_' + gene] = 0.0  # rate of active protein degradation by synthetic protease - zero by default (/h/nM)
+
+    # special genes - must be handled in a particular way if not presemt
+    # chloramphenicol acetlytransferase gene - antibiotic resistance
+    if ('cat' in genes):
+        default_par['cat_gene_present'] = 1  # chloramphenicol resistance gene present
+    else:
+        default_par['cat_gene_present'] = 0  # chloramphenicol resistance gene absent
+        # add placeholder to the position decoder dictionary - will never be used but are required for correct execution
+        name2pos['p_cat'] = 0
+    # synthetic protease gene - synthetic protein degradation
+    if ('prot' in genes):
+        default_par['prot_gene_present'] = 1
+    else:
+        default_par['prot_gene_present'] = 0
+        name2pos['p_prot'] = 0
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['m_' + gene] = 0
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    # gene styles
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    # miscellaneous species styles
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
 
 # transcription regulation functions
 def nocircuit_F_calc(t ,x, par, name2pos):

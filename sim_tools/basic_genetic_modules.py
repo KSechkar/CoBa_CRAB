@@ -13,13 +13,59 @@ import numpy as np
 # initialise all the necessary parameters to simulate the circuit
 # return the default parameters and initial conditions, species name to ODE vector position decoder and plot colour palette
 def nocircuit_initialise():
-    default_par={}
-    default_init_conds={}
-    genes={}
-    miscs={}
-    name2pos={}
-    circuit_colours={}
-    return default_par, default_init_conds, genes, miscs, name2pos, circuit_colours
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    genes = []  # names of genes in the circuit: output fluorescent protein
+    miscs = []  # names of miscellaneous species involved in the circuit (e.g. metabolites)
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['p_' + genes[i]] = 8 + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['q_' + genes[i]] = i  # resource demands (in q_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes:  # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['q_' + gene] = 1.0  # resource demand (unitless)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par['d_' + gene] = 0.0  # rate of active protein degradation - zero by default (/h)
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    # gene styles
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    # miscellaneous species styles
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
 
 # transcription regulation functions
 def nocircuit_F_calc(t ,x, par, name2pos):
@@ -338,10 +384,13 @@ def sas_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
+    # OFP CO-EXPRESSED WITH SWITCH FROM THE SAME OPERON = > same q, but rescaled
+    q_ofp = par['q_switch'] * par['n_ofp'] / par['n_switch']
+
     # RETURN THE ODE
     return [# proteins
             (e / par['n_switch']) * (F[name2pos['F_switch']] * par['q_switch'] / D) * R - l * x[name2pos['p_switch']],
-            (e/par['n_ofp']) * (F[name2pos['F_ofp']] * par['q_ofp'] / D) * R - l * x[name2pos['p_ofp']] - par['mu_ofp'] * x[name2pos['p_ofp']],
+            (e/par['n_ofp']) * (F[name2pos['F_ofp']] * q_ofp / D) * R - l * x[name2pos['p_ofp']] - par['mu_ofp'] * x[name2pos['p_ofp']],
             # mature fluorescent proteins
             par['mu_ofp']*x[name2pos['p_ofp']] - l*x[name2pos['ofp_mature']]
     ]
@@ -454,10 +503,13 @@ def sas2_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
+    # OFP2 CO-EXPRESSED WITH SWITCH2 FROM THE SAME OPERON = > same q, but rescaled
+    q_ofp2 = par['q_switch2'] * par['n_ofp2'] / par['n_switch2']
+
     # RETURN THE ODE
     return [# proteins
             (e / par['n_switch2']) * (F[name2pos['F_switch2']] * par['q_switch2'] / D) * R - l * x[name2pos['p_switch2']],
-            (e / par['n_ofp2']) * (F[name2pos['F_ofp2']] * par['q_ofp2'] / D) * R - l * x[name2pos['p_ofp2']] - par['mu_ofp2'] * x[name2pos['p_ofp2']],
+            (e / par['n_ofp2']) * (F[name2pos['F_ofp2']] * q_ofp2 / D) * R - l * x[name2pos['p_ofp2']] - par['mu_ofp2'] * x[name2pos['p_ofp2']],
             # mature fluorescent proteins
             par['mu_ofp2']*x[name2pos['p_ofp2']] - l*x[name2pos['ofp2_mature']]
     ]

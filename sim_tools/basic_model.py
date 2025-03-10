@@ -211,15 +211,15 @@ class ModelAuxiliary:
 
         # GENERAL PARAMETERS
         params['M'] = 1.19e9  # mass of protein in the cell (aa)
-        params['e'] = 6.6e4  # translation elongation rate (aa/h)
+        params['e'] = 66077.664  # translation elongation rate (aa/h)
 
         # GENE EXPRESSION parAMETERS
         # ribosomal genes
-        params['q_r'] =1.30e4  # resource demand
+        params['q_r'] = 13005.314453125  # resource demand
         params['n_r'] = 7459.0  # protein length (aa)
 
         # other (non-ribosomal) native genes
-        params['q_o'] = 6.11e4  # resource demand
+        params['q_o'] = 61169.44140625  # resource demand
         params['n_o'] = 300.0  # protein length (aa)
         return params
 

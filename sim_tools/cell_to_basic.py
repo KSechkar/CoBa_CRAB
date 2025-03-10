@@ -59,7 +59,7 @@ def cell2basic_onegene(
         cellmodel_params_considered = cellmodel_auxil.default_params()
     if(nutr_qual_considered is None):
         cellmodel_default_init_conds = cellmodel_auxil.default_init_conds(cellmodel_params_considered)
-        nutr_qual = cellmodel_default_init_conds['s']
+        nutr_qual_considered = cellmodel_default_init_conds['s']
     
     # PREPARE FOR SIMULATION
     # initialise cell model
@@ -113,13 +113,15 @@ def cell2basic_onegene(
 
     # LOAD THE PARAMETERS TO BE CONSIDERED
     # copy the relevant cell model parameters
-    for key in par.keys():
-        par[key]=cellmodel_auxil.default_params()[key]
+    for key in cellmodel_params_considered.keys():
+        par[key]=cellmodel_params_considered[key]
     # copy the relevant gene parameters
     cellmodel_init_conds.update({'s': nutr_qual_considered})
     # copy the relevant synthetic gene parameters
     for key in gene_params.keys():
-        par[key]=gene_params[key]
+        param_type=key.split('_')[0]
+        par[param_type+'_ofp'] = gene_params[key]  # copy no. (nM)
+
     # set synthetic gene degradation and maturation rates to zero as irrelevant for the RC factor
     par['d_ofp'] = 0.0
     par['m_ofp'] = 0.0
@@ -140,6 +142,11 @@ def cell2basic_onegene(
     meastimestep = 48.0  # hours - only care about the steady state at the end
 
     # choose ODE solver
+    # ode_solver, us_size = odesols.create_diffrax_solver(odeuus_complete,
+    #                                                     control_delay=0,
+    #                                                     meastimestep=meastimestep,
+    #                                                     rtol=1e-6, atol=1e-6,
+    #                                                     solver_spec='Kvaerno3')
     ode_solver, us_size = odesols.create_euler_solver(odeuus_complete,
                                                       control_delay=control_delay,
                                                       meastimestep=meastimestep,
@@ -182,26 +189,30 @@ def cell2basic_onegene(
 
     # LOOK AT THE STEADY STATE
     # get steady-state translation elongation rate and resource competition denominator
-    es, _, _, _, _, _, D = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
+    es, _, _, _, _, _, Ds = cellmodel_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
                                                                     synth_genes, synth_miscs,
                                                                     modules_name2pos,
                                                                     module1_specterms, module2_specterms)
     e=es[-1]
-    # get the steady-state mass fractions of ribosomal and other native proteins
-    phi_r = par['n_r']*xs[-1,0]/par['M']
-    phi_o = par['n_o']*xs[-1,1]/par['M']
+    D=Ds[-1]
+    # assuming that other native proteins are the same length as metabolic and housekeeping proteins in the cell model, i.e. n_o=n_a=n_q=300 amino acids
+    n_o = par['n_a']
+    # get the steady-state mass fractions of ribosomal proteins
+    phi_r = par['n_r']*xs[-1,3]/par['M']
     # get the steady-state mass fraction of the synthetic protein
     phi_ofp = par['n_ofp']*(xs[-1,modules_name2pos['p_ofp']]+xs[-1,modules_name2pos['ofp_mature']])/par['M']
+    # get the steady-state mass fraction of other native proteins
+    phi_o = 1-phi_r-phi_ofp
 
     # GET THE BASIC MODEL PARAMETERS FROM THE STEADY STATE
     # get the synthetic gene's resource competition factor
-    q_gene = phi_ofp*(D-1)
+    q_gene = float(phi_ofp*(D-1))
 
     # get the basic host cell model parameters
     basic_host_params={'M': par['M'],
-                       'n_r': par['n_r'], 'n_o': par['n_o'],
+                       'n_r': par['n_r'], 'n_o': n_o,
                        'e':e,
-                       'q_r': phi_r*(D-1), 'q_o': phi_o*(D-1)}
+                       'q_r': float(phi_r*(D-1)), 'q_o': float(phi_o*(D-1))}
 
     # return the synthetic gene's parameters, then a dictionary of host cell model parameters
     return q_gene, basic_host_params
@@ -216,7 +227,8 @@ def cell2basic_native(
     synth_gene_params, _, _, _, _, _ = cell_gms.constfp_initialise()
     # set the copy number to zero
     for key in synth_gene_params.keys():
-        synth_gene_params[key] = 0.0
+        if(key[0:2]=='c_'):
+            synth_gene_params[key] = 0.0
 
     # run the function for finding synthetic gene parameters
     _, basic_host_params = cell2basic_onegene(synth_gene_params, cellmodel_params, nutr_qual)
@@ -244,6 +256,28 @@ def cell2basic_all(
             cellmodel_and_circuit_params, nutr_qual)
         all_basic_synthgene_params[gene_name]['n_'+gene_name] = cellmodel_and_circuit_params['n_'+gene_name]
 
+    # if we're dealing with a self-activating switch, handle the special case of co-expression from the same operon for ofp
+    # and override q_ofp
+    if ('ofp' in synth_genes and 'switch' in synth_genes):
+        picked_params_ofp = pick_params_for_cell2basic('switch', cellmodel_and_circuit_params)  # get the switch gene parameters...
+        # ... but use the ofp gene's mRNA-ribosome association and dissociation rates
+        picked_params_ofp['k+_' + 'switch'] = cellmodel_and_circuit_params['k+_' + 'ofp']
+        picked_params_ofp['k-_' + 'switch'] = cellmodel_and_circuit_params['k-_' + 'ofp']
+        # retrieve q for the ofp gene - as if we were dealing with the switch
+        q_ofp, _ = cell2basic_onegene(picked_params_ofp, cellmodel_and_circuit_params, nutr_qual)
+        # add the ratio parameter to the dictionary
+        all_basic_synthgene_params['ofp']['q_ofp_div_q_switch'] = q_ofp / (all_basic_synthgene_params['switch'])['q_switch']
+        # pop the original q_ofp
+        all_basic_synthgene_params['ofp'].pop('q_ofp')
+    # do the same overriding if we have the second self-activating switch
+    if ('ofp2' in synth_genes and 'switch2' in synth_genes):
+        picked_params_ofp2 = pick_params_for_cell2basic('switch2', cellmodel_and_circuit_params)
+        picked_params_ofp2['k+_' + 'switch2'] = cellmodel_and_circuit_params['k+_' + 'ofp']
+        picked_params_ofp2['k-_' + 'switch2'] = cellmodel_and_circuit_params['k-_' + 'ofp']
+        q_ofp2, _ = cell2basic_onegene(picked_params_ofp2, cellmodel_and_circuit_params, nutr_qual)
+        all_basic_synthgene_params['ofp2']['q_ofp2_div_q_switch2'] = q_ofp2 / (all_basic_synthgene_params['switch2'])['q_switch2']
+        all_basic_synthgene_params['ofp2'].pop('q_ofp2')
+
     # gather all parameters in one dictionary
     basic_params = {}
     basic_params.update(basic_host_params)
@@ -263,6 +297,7 @@ def main():
     circ_par['c_switch'] = 100.0
     circ_par['a_switch'] = 3000.0
     circ_par['k+_switch'] = 60.0 / 100.0
+    circ_par['k+_ofp'] = 60.0
 
     circ_par['baseline_switch'] = 0.05
     circ_par['K_switch'] = 250.0
@@ -284,11 +319,57 @@ def main():
     cellmodel_par = cellmodel_auxil.default_params()  # get default parameter values
     cell_init_conds = cellmodel_auxil.default_init_conds(cellmodel_par)  # get default initial conditions
 
-    # add circuit parameters
-    cellmodel_par.update(circ_par)
+    # add reference tracker switcher
+    model_par_with_refswitch, ref_switcher = cellmodel_auxil.add_reference_switcher(cellmodel_par,
+                                                                                # cell model parameters
+                                                                                refsws.timed_switching_initialise,
+                                                                                # function initialising the reference switcher
+                                                                                refsws.timed_switching_switch
+                                                                                # function switching the references to be tracked
+                                                                                )
+
+    # load synthetic genetic modules and the controller
+    odeuus_complete, \
+        module1_F_calc, module2_F_calc, \
+        module1_specterms, module2_specterms, \
+        controller_action, controller_update, \
+        par, init_conds, controller_memo0, \
+        synth_genes_total_and_each, synth_miscs_total_and_each, \
+        controller_memos, controller_dynvars, controller_ctrledvar, \
+        modules_name2pos, modules_styles, controller_name2pos, controller_styles, \
+        module1_v_with_F_calc, module2_v_with_F_calc = cellmodel_auxil.add_modules_and_controller(
+        # module 1
+        cell_gms.sas_initialise,  # function initialising the circuit
+        cell_gms.sas_ode,  # function defining the circuit ODEs
+        cell_gms.sas_F_calc,  # function calculating the circuit genes' transcription regulation functions
+        cell_gms.sas_specterms,
+        # function calculating the circuit genes effective mRNA levels (due to possible co-expression from the same operons)
+        # module 2
+        cell_gms.cicc_initialise,  # function initialising the circuit
+        cell_gms.cicc_ode,  # function defining the circuit ODEs
+        cell_gms.cicc_F_calc,  # function calculating the circuit genes' transcription regulation functions
+        cell_gms.cicc_specterms,
+        # function calculating the circuit genes effective mRNA levels (due to possible co-expression from the same operons)
+        # controller
+        ctrls.pichem_initialise,  # function initialising the controller
+        ctrls.pichem_action,  # function calculating the controller action
+        ctrls.pichem_ode,  # function defining the controller ODEs
+        ctrls.pichem_update,  # function updating the controller based on measurements
+        # cell model parameters and initial conditions
+        model_par_with_refswitch, cell_init_conds)
+
+    # unpack the synthetic genes and miscellaneous species lists
+    synth_genes = synth_genes_total_and_each[0]
+    module1_genes = synth_genes_total_and_each[1]
+    module2_genes = synth_genes_total_and_each[2]
+    synth_miscs = synth_miscs_total_and_each[0]
+    module1_miscs = synth_miscs_total_and_each[1]
+    module2_miscs = synth_miscs_total_and_each[2]
+
+    par.update(circ_par)
 
     print(cell2basic_all(synth_genes=['switch', 'ofp', 'ta', 'b'],
-                         cellmodel_and_circuit_params=circ_par,
+                         cellmodel_and_circuit_params=par,
                          nutr_qual=cell_init_conds['s']))
 
     return

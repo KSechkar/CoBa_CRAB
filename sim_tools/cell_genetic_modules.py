@@ -97,7 +97,8 @@ def nocircuit_F_calc(t ,x, par, name2pos):
 
 # ode
 def nocircuit_ode(F_calc,     # calculating the transcription regulation functions
-            t,  x,  # time, cell state, external inputs
+            t,  x,  # time, cell state
+            u, # controller input
             e, l, # translation elongation rate, growth rate
             R, # ribosome count in the cell, resource
             k_het, D, # effective mRNA-ribosome dissociation constants for synthetic genes, resource competition denominator

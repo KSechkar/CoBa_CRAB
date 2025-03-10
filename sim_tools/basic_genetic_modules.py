@@ -72,14 +72,15 @@ def nocircuit_F_calc(t ,x, par, name2pos):
     return jnp.array([])
 
 # ode
-def nocircuit_ode(F_calc,     # calculating the transcription regulation functions
-            t,  x,  # time, cell state, external inputs
-            e, l, # translation elongation rate, growth rate
-            R, # ribosome count in the cell, resource
-            q_het, D, # resource demands for synthetic genes, resource competition denominator
-            par,  # system parameters
-            name2pos  # name to position decoder
-            ):
+def nocircuit_ode(F_calc,  # calculating the transcription regulation functions
+                  t, x,  # time, cell state
+                  u,  # controller input
+                  e, l,  # translation elongation rate, growth rate
+                  R,  # ribosome count in the cell, resource
+                  q_het, D,  # resource demands for synthetic genes, resource competition denominator
+                  par,  # system parameters
+                  name2pos  # name to position decoder
+                  ):
     # RETURN THE ODE
     return []
 
@@ -335,6 +336,9 @@ def sas_initialise():
     default_par['mu_ofp'] = 1 / (13.6 / 60)  # sfGfp2 maturation time of 13.6 min
     default_par['n_ofp_mature'] = default_par['n_ofp']  # protein length - same as the freshly synthesised protein
     default_par['d_ofp_mature'] = default_par['d_ofp']  # mature ofp degradation rate - same as the freshly synthesised protein
+
+    # special case: due to co-expression from the same operon, q_ofp = q_switch * q_ofp_div_q_switch
+    default_par['q_ofp_div_q_switch'] = 1.0
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -384,8 +388,8 @@ def sas_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
-    # OFP CO-EXPRESSED WITH SWITCH FROM THE SAME OPERON = > same q, but rescaled
-    q_ofp = par['q_switch'] * par['n_ofp'] / par['n_switch']
+    # special case: due to co-expression from the same operon, q_ofp = q_switch * q_ofp_div_q_switch
+    q_ofp = par['q_switch'] * par['q_ofp_div_q_switch']
 
     # RETURN THE ODE
     return [# proteins
@@ -454,6 +458,9 @@ def sas2_initialise():
     default_par['mu_ofp2'] = 1 / (13.6 / 60)  # sfGfp2 maturation time of 13.6 min
     default_par['n_ofp2_mature'] = default_par['n_ofp2']  # protein length - same as the freshly synthesised protein
     default_par['d_ofp2_mature'] = default_par['d_ofp2']  # mature ofp degradation rate - same as the freshly synthesised protein
+
+    # special case: due to co-expression from the same operon, q_ofp2 = q_switch2 * q_ofp2_div_q_switch2
+    default_par['q_ofp2_div_q_switch2'] = 1.0
     # -------- ...TO HERE
 
     # default palette and dashes for plotting (5 genes + misc. species max)
@@ -503,8 +510,8 @@ def sas2_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
-    # OFP2 CO-EXPRESSED WITH SWITCH2 FROM THE SAME OPERON = > same q, but rescaled
-    q_ofp2 = par['q_switch2'] * par['n_ofp2'] / par['n_switch2']
+    # special case: due to co-expression from the same operon, q_ofp2 = q_switch2 * q_ofp2_div_q_switch2
+    q_ofp2 = par['q_switch2'] * par['q_ofp2_div_q_switch2']
 
     # RETURN THE ODE
     return [# proteins

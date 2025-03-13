@@ -371,8 +371,7 @@ def sas_F_calc(t ,x, u, par, name2pos):
                 p_switch_term ** par['eta_switch'] + 1)
     return jnp.array([
         F_switch,
-        F_switch
-        # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
+        F_switch    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
     ])
 
 # ODE
@@ -388,13 +387,16 @@ def sas_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
+    # get the resource demand of the switch gene
+    q_switch = F[name2pos['F_switch']] * par['q_switch']
+
     # special case: due to co-expression from the same operon, q_ofp = q_switch * q_ofp_div_q_switch
-    q_ofp = par['q_switch'] * par['q_ofp_div_q_switch']
+    q_ofp = par['q_ofp_div_q_switch'] * q_switch
 
     # RETURN THE ODE
     return [# proteins
-            (e / par['n_switch']) * (F[name2pos['F_switch']] * par['q_switch'] / D) * R - l * x[name2pos['p_switch']],
-            (e/par['n_ofp']) * (F[name2pos['F_ofp']] * q_ofp / D) * R - l * x[name2pos['p_ofp']] - par['mu_ofp'] * x[name2pos['p_ofp']],
+            (e / par['n_switch']) * (q_switch / D) * R - l * x[name2pos['p_switch']],
+            (e/par['n_ofp']) * (q_ofp / D) * R - l * x[name2pos['p_ofp']] - par['mu_ofp'] * x[name2pos['p_ofp']],
             # mature fluorescent proteins
             par['mu_ofp']*x[name2pos['p_ofp']] - l*x[name2pos['ofp_mature']]
     ]
@@ -510,13 +512,16 @@ def sas2_ode(F_calc,  # calculating the transcription regulation functions
     # GET REGULATORY FUNCTION VALUES
     F = F_calc(t, x, u, par, name2pos)
 
+    # get the second switch's resource demand
+    q_switch2 = F[name2pos['F_switch2']] * par['q_switch2']
+
     # special case: due to co-expression from the same operon, q_ofp2 = q_switch2 * q_ofp2_div_q_switch2
-    q_ofp2 = par['q_switch2'] * par['q_ofp2_div_q_switch2']
+    q_ofp2 = par['q_ofp2_div_q_switch2'] * q_switch2
 
     # RETURN THE ODE
     return [# proteins
-            (e / par['n_switch2']) * (F[name2pos['F_switch2']] * par['q_switch2'] / D) * R - l * x[name2pos['p_switch2']],
-            (e / par['n_ofp2']) * (F[name2pos['F_ofp2']] * q_ofp2 / D) * R - l * x[name2pos['p_ofp2']] - par['mu_ofp2'] * x[name2pos['p_ofp2']],
+            (e / par['n_switch2']) * (q_switch2 / D) * R - l * x[name2pos['p_switch2']],
+            (e / par['n_ofp2']) * (q_ofp2 / D) * R - l * x[name2pos['p_ofp2']] - par['mu_ofp2'] * x[name2pos['p_ofp2']],
             # mature fluorescent proteins
             par['mu_ofp2']*x[name2pos['p_ofp2']] - l*x[name2pos['ofp2_mature']]
     ]

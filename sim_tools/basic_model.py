@@ -15,10 +15,11 @@ from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts
 import time
 
 # CIRCUIT AND EXTERNAL INPUT IMPORTS -----------------------------------------------------------------------------------
-import basic_genetic_modules as gms
-import controllers as ctrls
-import reference_switchers as refsws
-import ode_solvers as odesols
+# import basic_genetic_modules as gms
+# import controllers as ctrls
+# import reference_switchers as refsws
+# import ode_solvers as odesols
+
 
 # CELL MODEL FUNCTIONS -------------------------------------------------------------------------------------------------
 # Definitions of functions appearing in the cell model ODEs
@@ -313,7 +314,7 @@ class ModelAuxiliary:
                           line_width=0.5, line_color='black', fill_color=self.gene_colours['r'],
                           legend_label='R')
 
-        # plot metabolic protein mass
+        # plot other protein mass
         bottom_line = top_line
         top_line = bottom_line + xs[:, 1] * par['n_o']
         mass_figure.patch(np.concatenate((ts, flip_t)), np.concatenate((bottom_line, np.flip(top_line))),
@@ -481,17 +482,13 @@ class ModelAuxiliary:
         # get the state vector with effective mRNA concs (due to possible synth gene co-expression from same operons)
         module1_specterms_vmap = jax.vmap(module1_specterms, in_axes=(0, None, None))
         module2_specterms_vmap = jax.vmap(module2_specterms, in_axes=(0, None, None))
-        xs_eff = np.array(jnp.concatenate((xs[:, 0:8],
-                                          module1_specterms_vmap(xs, par, modules_name2pos)[0], # eff mRNA concs are the first output of specterms
-                                          module2_specterms_vmap(xs, par, modules_name2pos)[0], # eff mRNA concs are the first output of specterms
-                                          xs[:, 8 + len(synth_genes):]), axis=1))
 
         # find values of gene transcription regulation functions
         Fs1 = np.zeros((len(ts), len(module1_genes)))  # initialise
         Fs2 = np.zeros((len(ts), len(module2_genes)))  # initialise
         for i in range(0, len(ts)):
-            Fs1[i, :] = np.array(module1_F_calc(ts[i], xs_eff[i, :], uexprecord[i], par, modules_name2pos)[:])
-            Fs2[i, :] = np.array(module2_F_calc(ts[i], xs_eff[i, :], uexprecord[i], par, modules_name2pos)[:])
+            Fs1[i, :] = np.array(module1_F_calc(ts[i], xs[i, :], uexprecord[i], par, modules_name2pos)[:])
+            Fs2[i, :] = np.array(module2_F_calc(ts[i], xs[i, :], uexprecord[i], par, modules_name2pos)[:])
 
         # Create ColumnDataSource object for the plot
         data_for_column = {'t': ts}  # initialise with time axis
@@ -836,8 +833,10 @@ class ModelAuxiliary:
 
             # find the synthetic genes' total resource demand
             q_het_np = np.zeros_like(t) # initialise np array
-            for gene in synth_genes:
+            for gene in module1_genes:
                 q_het_np += Fs1_np[:, modules_name2pos['F_'+gene]]*par['q_'+gene]
+            for gene in module2_genes:
+                q_het_np += Fs2_np[:, modules_name2pos['F_'+gene]]*par['q_'+gene]
             # convert to jnp array
             q_het = jnp.array(q_het_np)
 
@@ -1105,6 +1104,22 @@ def main():
     jax.config.update('jax_platform_name', 'cpu')
     jax.config.update("jax_enable_x64", True)
 
+    # chemically cybercontrolled probe
+    # basic_circ_par={}
+    # basic_circ_par['q_switch'] = 125.0  # resource competition factor for the switch gene
+    # basic_circ_par['q_ofp_div_q_switch'] = 100.0  # ratio of the ofp's RC factor to that of the switch - defined like that due to co-expression from the same operon
+    # basic_circ_par['baseline_switch'] = 0.05
+    # basic_circ_par['K_switch'] = 250.0
+    # basic_circ_par['I_switch'] = 0.1
+    # basic_circ_par['q_ta'] = 45.0  # RC factor for the transcription activation factor
+    # basic_circ_par['q_b'] = 6e4  # RC factor for the burdensome gene of the probe
+    # basic_circ_par['mu_b'] = 1 / (13.6 / 60)
+    # basic_circ_par['baseline_tai-dna'] = 0.01
+
+    basic_circ_par = {}
+    basic_circ_par['q_ofp'] = 125.0
+    basic_circ_par['q_ofp2'] = 30062.5
+
     # initialise cell model
     model_auxil = ModelAuxiliary()  # auxiliary tools for simulating the model and plotting simulation outcomes
     model_par = model_auxil.default_params()  # get default parameter values
@@ -1138,16 +1153,13 @@ def main():
             gms.constfp2_specterms,  # function correcting the effective mRNA concentrations due to possible co-expression from the same operons
             # function calculating the circuit genes' transcription regulation functions
             # controller
-            ctrls.pichem_initialise,  # function initialising the controller
-            ctrls.pichem_action,  # function calculating the controller action
-            ctrls.pichem_ode,  # function defining the controller ODEs
-            ctrls.pichem_update,  # function updating the controller based on measurements
-            # ctrls.cci_initialise,  # function initialising the controller
-            # ctrls.cci_action,  # function calculating the controller action
-            # ctrls.cci_ode,  # function defining the controller ODEs
-            # ctrls.cci_update,  # function updating the controller based on measurements
+            ctrls.ciref_initialise,  # function initialising the controller
+            ctrls.ciref_action,  # function calculating the controller action
+            ctrls.ciref_ode,  # function defining the controller ODEs
+            ctrls.ciref_update,  # function updating the controller based on measurements
             # cell model parameters and initial conditions
             model_par_with_refswitch, init_conds)
+    par.update(basic_circ_par)
 
     # unpack the synthetic genes and miscellaneous species lists
     synth_genes= synth_genes_total_and_each[0]
@@ -1159,16 +1171,16 @@ def main():
 
     # SET PARAMETERS
     # set the parameters for the synthetic genes
-    par['q_ofp']=0.5*(par['q_r']+par['q_o'])  # resource demand of the output fluorescent protein
+    # par['q_ofp']=0.5*(par['q_r']+par['q_o'])  # resource demand of the output fluorescent protein
 
     # controller
     init_conds['inducer_level']=1000.0
 
     # SET CONTROLLER PARAMETERS
     controller_ctrledvar='ofp_mature' # variable read and steered by the controller
-    experiment_duration=80.0
+    experiment_duration=24.0#24.0
     points_in_space=10
-    refs=np.linspace(1.7e4, 1e4, points_in_space) # reference values
+    refs=np.linspace(0.0, 15.0, points_in_space) # reference values
     par['t_switch_ref']=experiment_duration/points_in_space    # time of reference switch
 
     control_delay=0.0   # control action delay
@@ -1233,6 +1245,24 @@ def main():
     refrecord= np.array(refrecord_jnp)
 
     print('Simulation time: ', time.time()-timer, ' s')
+
+    # get the cell growth rates over time
+    _, ls_jnp, _, _, _, _, _ = model_auxil.get_e_l_Fr_nu_psi_T_D(ts, xs, par,
+                                                                 synth_genes, synth_miscs,
+                                                                 modules_name2pos,
+                                                                 module1_specterms, module2_specterms,
+                                                                 # arguments only used by the basic model
+                                                                 module1_F_calc, module2_F_calc,
+                                                                 uexprecord,
+                                                                 synth_genes_total_and_each, synth_miscs_total_and_each
+                                                                 )
+    ls = np.array(ls_jnp)
+    l=ls[-1]
+
+    print(
+        par['M']/par['n_ofp2']*(par['q_ofp2'])/(1+par['q_r']+par['q_o']+par['q_ofp']+par['q_ofp2']) * (par['mu_ofp2']/(l+par['mu_ofp2']))
+    )
+    print(xs[-1, modules_name2pos['ofp2_mature']])
 
     # make plots
     # PLOT - HOST CELL MODEL

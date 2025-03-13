@@ -35,7 +35,7 @@ def F_real_calc(p_switch,   # switch protein level
 
 
 # required value
-def F_reQ_calc(p_switch, # switch protein level
+def F_req_calc(p_switch, # switch protein level
                Q_osynth, # burden of other (non-switch) synthetic genes
                par, # system parameters
                cellvars # steady-state cellular variables obtained by simulation
@@ -59,7 +59,7 @@ def dFreal_dpswitch_calc(p_switch, par):
 
 
 # required value
-def dFreQ_dpswitch_calc(p_switch,   # switch protein level
+def dFreq_dpswitch_calc(p_switch,   # switch protein level
                         Q_osynth,   # burden of other (non-switch) synthetic genes
                         par,        # system parameters
                         cellvars    # steady-state cellular variables obtained by simulation
@@ -86,8 +86,8 @@ def gradiff_from_F(F,   # value of F_switch
 
     # get the gradients
     dFreal_dpswitch = dFreal_dpswitch_calc(p_switch, par)
-    dFreQ_dpswitch = dFreQ_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
-    return dFreal_dpswitch - dFreQ_dpswitch
+    dFreq_dpswitch = dFreq_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
+    return dFreal_dpswitch - dFreq_dpswitch
 
 
 # difference of gradients at the fixed point for a given value of p_switch
@@ -101,8 +101,8 @@ def gradiff_from_pswitch(p_switch,  # value of p_switch
 
     # get the gradients
     dFreal_dpswitch = dFreal_dpswitch_calc(p_switch, par)
-    dFreQ_dpswitch = dFreQ_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
-    return dFreal_dpswitch - dFreQ_dpswitch
+    dFreq_dpswitch = dFreq_dpswitch_calc(p_switch, Q_osynth, par, cellvars)
+    return dFreal_dpswitch - dFreq_dpswitch
 
 
 # find p_switch value for a given real value of F_switch
@@ -135,7 +135,7 @@ def pswitch_inflexion_in_Freal(par):
 def diff_from_pswitch(pswitch, Q_osynth, par, cellvars):
     # get the F values
     F_real = F_real_calc(pswitch, par)
-    F_req = F_reQ_calc(pswitch, Q_osynth, par, cellvars)
+    F_req = F_req_calc(pswitch, Q_osynth, par, cellvars)
     return F_real - F_req
 
 
@@ -332,7 +332,7 @@ def get_ss_F_and_e(nutr_qual):
 
 # get normalised maximum burden values and degradation coefficients for the synthetic genes, given the steady-state e and F_r
 # CURRENTLY DOES NOT HANDLE NON-ZERO CHLORAMPHENICOL CONCENTRATIONS
-def find_qs_and_chis(
+def find_Qs_and_chis(
         e_ss,  # steady-state translation elongation rate
         F_r_ss,  # steady-state ribosomal gene transcription function
         par,  # system parameters
@@ -355,7 +355,7 @@ def find_qs_and_chis(
     xi_native = xi_a + xi_r  # total native gene expression burden
 
     # for each synthetic gene, get the NORMALISED, MAXIMUM POSSIBLE burden value and the degradation coefficient
-    qmaxs = {}  # dictionary for the normalised maximum burden values
+    Qmaxs = {}  # dictionary for the normalised maximum burden values
     chis = {}  # dictionary for the degradation coefficients
     for gene in synth_genes:
         if((gene=='ofp') and ('switch' in synth_genes)):  # in the self-activating switch, the ofp gene is co-expressed with the switch => switch gene c and a used
@@ -368,18 +368,18 @@ def find_qs_and_chis(
                                   1,    # for maximum burden, maximum transcription regulation function value is used, i.e. F=1
                                   par['c_' + gene], par['a_' + gene],
                                   k_het[modules_name2pos['k_' + gene]])
-        qmaxs['Q_'+gene+'_max'] = xi_gene_max / xi_native  # record the normalised maximum burden value
+        Qmaxs['Q_'+gene+'_max'] = xi_gene_max / xi_native  # record the normalised maximum burden value
         chis['chi_'+gene] = chi_calc(par['d_' + gene], e_ss,
                                          0, # assuming no chloramphenicol present
                                          par, xi_gene_max, xi_native)  # record the degradation coefficient
 
     # knowing normalised burden values q is also useful for native genes => retrieve
-    qs_native = {}
-    qs_native['Q_a']=xi_a/xi_native
-    qs_native['Q_r']=xi_r/xi_native
+    Qs_native = {}
+    Qs_native['Q_a']=xi_a/xi_native
+    Qs_native['Q_r']=xi_r/xi_native
 
     # return
-    return qmaxs, qs_native, chis
+    return Qmaxs, Qs_native, chis
 
 # FINDING THE BIFURCATIONS ---------------------------------------------------------------------------------------------
 # find the bifurcation points for the self-activating switch

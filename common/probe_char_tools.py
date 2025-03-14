@@ -3,28 +3,13 @@
 # By Kirill Sechkar
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
-import numpy as np
 import scipy as sp
-import jax
-import jax.numpy as jnp
-import jaxopt
-import functools
-from diffrax import diffeqsolve, Dopri5, ODETerm, SaveAt, PIDController, SteadyStateEvent
-import pandas as pd
-import pickle
-from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts, palettes as bkpalettes, transform as bktransform
-from math import pi
-import time
 
-import matplotlib as mpl, matplotlib.pyplot as plt
-from pandas.tests.config.test_localization import test_get_locales_at_least_one
+import matplotlib.pyplot as plt
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
-from sim_tools.cell_model import *
-import sim_tools.cell_genetic_modules as gms
-import sim_tools.controllers as ctrls
-import sim_tools.reference_switchers as refsws
-import sim_tools.ode_solvers as odesols
+from cell_model_case.cell_model import *
+
 
 # CALCULATING NORMALISED RESOURCE COMPETITION FACTORS ------------------------------------------------------------------
 # find Q values for the two modules, given the results of observing them individually and in a pair

@@ -5,25 +5,14 @@ to find the parameters of the basic model yielding the same output
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
 import numpy as np
-import jax
 import jax.numpy as jnp
-import jaxopt
-import functools
-from diffrax import diffeqsolve, Dopri5, ODETerm, SaveAt, PIDController, SteadyStateEvent
-import pandas as pd
-import pickle
-from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts, palettes as bkpalettes, transform as bktransform
-from math import pi
-import time
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
-from sim_tools.cell_model import ModelAuxiliary as CellModelAuxiliary, ode_sim as cell_ode_sim  # cell model import
-from sim_tools.basic_model import ModelAuxiliary as BasicModelAuxiliary, ode_sim as basic_ode_sim  # basic model import
-import sim_tools.cell_genetic_modules as cell_gms
-import sim_tools.basic_genetic_modules as basic_gms
-import sim_tools.controllers as ctrls
-import sim_tools.reference_switchers as refsws
-import sim_tools.ode_solvers as odesols
+from cell_model_case.cell_model import ModelAuxiliary as CellModelAuxiliary, ode_sim as cell_ode_sim  # cell model import
+import cell_model_case.cell_genetic_modules as cell_gms
+import common.controllers as ctrls
+import common.reference_switchers as refsws
+import common.ode_solvers as odesols
 
 # PICK OUT A GIVEN GENE'S PARAMETERS RELEVANT TO SETTING THE BASIC MODEL PARAMETERS ------------------------------------
 def pick_params_for_cell2basic(

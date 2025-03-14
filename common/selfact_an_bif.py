@@ -3,24 +3,14 @@
 # By Kirill Sechkar
 
 # PACKAGE IMPORTS ------------------------------------------------------------------------------------------------------
-import numpy as np
-import jax
-import jax.numpy as jnp
 import jaxopt
-import functools
-from diffrax import diffeqsolve, Dopri5, ODETerm, SaveAt, PIDController, SteadyStateEvent
-import pandas as pd
-import pickle
-from bokeh import plotting as bkplot, models as bkmodels, layouts as bklayouts, palettes as bkpalettes, transform as bktransform
-from math import pi
-import time
 
 # OWN CODE IMPORTS -----------------------------------------------------------------------------------------------------
-from sim_tools.cell_model import *
-import sim_tools.cell_genetic_modules as gms
-import sim_tools.controllers as ctrls
-import sim_tools.reference_switchers as refsws
-import sim_tools.ode_solvers as odesols
+from cell_model_case.cell_model import *
+import cell_model_case.cell_genetic_modules as gms
+import common.controllers as ctrls
+import common.reference_switchers as refsws
+import common.ode_solvers as odesols
 
 # F_SWITCH FUNCTION VALUES ---------------------------------------------------------------------------------------------
 # real value

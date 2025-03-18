@@ -60,10 +60,25 @@ tspan=[0.0, 72.0];  % time span of the entire simulation
 teval=[tspan(1), tspan(end)-1.0, tspan(end)];
 ss_check_tol=1e-1;
 
+% ODE integration tolerances
+tol_settings=odeset('RelTol', 1e-13, 'AbsTol', 1e-13);
+
 % initial condition for the dynamics variables
 Y0=[par('M')/(2*par('n_r'));
     par('M')/(2*par('n_o'));
     0; 0; 0; 0; 0; 0;
+    ];
+
+% set the switch parameters for which we calculate sensitivities
+U=[par('q_switch')./(par('q_r')+par('q_o'));
+    par('q_ofp')./(par('q_r')+par('q_o'));
+    par('n_switch');
+    par('n_ofp');
+    par('mu_ofp');
+    par('baseline_switch');
+    par('K_switch');
+    par('I_switch');
+    par('eta_switch');
     ];
 
 %% RUN the simulations
@@ -75,15 +90,11 @@ u_ss=zeros(size(refs)); % control inputs
 ofp_mature_ss=zeros(size(refs)); % switch OFP
 b_mature_ss=zeros(size(refs));    % probe's burdensome OFP
 % relevant (i.e. output) sensitivites - element indexing is (experiment, output, parameter)
-DYDU_relevant=zeros(size(refs,2),2,5);
+DYDU_relevant=zeros(size(refs,2),2,size(U,1));
 
 for i=1:size(refs,2)
     % set the new parameters
     par('ref')=refs(i);
-
-    % set the U vector entries to appropriate parameters
-    U=[[par('q_switch'); par('q_ofp'); par('q_ta'); par('q_b')]./(par('q_r')+par('q_o'));...
-        par('ref')];
     
     % simulate
     [T, Y, DYDU]=sens_sys('selfact_cbc_ode', ...
@@ -148,11 +159,11 @@ for param1_cntr=1:size(U,1)
     end
 end
 
-disp(FIM)
+disp(FIM(2:end,2:end))
 
 %% CALCULATE the FIM's determinant
 
-disp(det(FIM(1:2,1:2)))
+cond(FIM(1:2,1:2))
 
 %% FUNCTION: append parameters to the initial condition
 function Y0_with_par = append_par(Y0, par)
@@ -165,15 +176,9 @@ Y0_with_par=[
     par('n_r');
     par('q_o');
     par('n_o');
-    % self-activating switch parameters - save for RC factors
-    par('n_switch');
-    par('n_ofp');
-    par('mu_ofp');
-    par('baseline_switch');
-    par('K_switch');
-    par('I_switch');
-    par('eta_switch');
-    % CBC probe parameters - save for the RC factor
+    % CBC probe parameters
+    par('q_ta')/(par('q_r')+par('q_o'));
+    par('q_b')/(par('q_r')+par('q_o'));
     par('n_ta');
     par('n_b');
     par('mu_b');
@@ -184,6 +189,7 @@ Y0_with_par=[
     % controller parameters
     par('Kp');
     par('max_u');
+    par('ref');
     ];
 end
 
@@ -191,3 +197,5 @@ end
 function is_steady = ss_check(x_penult, x_last, ss_tol)
     is_steady = sum(abs(x_last-x_penult)) < ss_tol;
 end
+
+%% FUNCTION: CHECK IF 

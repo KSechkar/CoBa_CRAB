@@ -9,11 +9,16 @@ function dXdt = selfact_constrep_ode( ...
     )
 
     % unpack the parameters for which we calculate sensitivities
-    Q_switch=U(1);  % normalised switch gene resource competition factor
-    Q_ofp=U(2);     % normalised the switch's output fluorescent protein gene RC factor
-    Q_ta=U(3);      % normalised probe transcription activator's RC factor
-    Q_b=U(4);       % normalised probe burdensome OFP's RC factor
-    ref=U(5);       % control reference
+    % unpack the switch parameters for which we calculate sensitivities
+    Q_switch=U(1);          % normalised switch gene resource competition factor
+    Q_ofp=U(2);             % normalised switch's output fluorescent protein gene RC factor
+    n_switch = U(3);        % switch protein length
+    n_ofp = U(4);           % switch OFP length
+    mu_ofp = U(5);          % switch OFP maturation rate
+    baseline_switch = U(6); % baseline expression of switch gene
+    K_switch = U(7);        % half-saturation constant for the switch protein's self-regulation
+    I_switch = U(8);        % share of switch proteins bound by an inducer molecule
+    eta_switch = U(9);      % cooperativity coefficicient of switch protein-DNA binding
 
     % unpack the dynamic variables from the state vector (all entries are specie concentrations in nM)
     R=X(1);             % ribosomes
@@ -33,25 +38,20 @@ function dXdt = selfact_constrep_ode( ...
     n_r = X(12);    % protein length (aa) of ribosomes
     q_o = X(13);    % resource demand of other native genes
     n_o = X(14);    % protein length (aa) of other native proteins
-    % self-activating switch parameters - save for RC factors
-    n_switch = X(15);           % switch protein length
-    n_ofp = X(16);              % switch OFP length
-    mu_ofp = X(17);             % switch OFP maturation rate
-    baseline_switch = X(18);        % baseline expression of switch gene
-    K_switch = X(19);               % half-saturation constant for the switch protein's self-regulation
-    I_switch = X(20);               % share of switch proteins bound by an inducer molecule
-    eta_switch = X(21);             % cooperativity coefficicient of switch protein-DNA binding
-    % CBC probe parameters -save for the RC factor
-    n_ta = X(22);               % probe's transcription activator protein length
-    n_b = X(23);                % probe's burdensome OFP length
-    mu_b = X(24);               % probe's burdensome OFP maturation rate
-    baseline_tai_dna = X(25);   % baseline expression of the burdnesome gene
-    K_ta_i = X(26);             % half-saturation constant for the binding between the inducer and the activator protein
-    K_tai_dna = X(27);          % half-saturation constant for the binding between the protein-inducer complex and the promoter DNA
-    eta_tai_dna = X(28);        % cooperativity coefficicient of complex-DNA binding
+    % CBC probe parameters 
+    Q_ta = X(15);               % normalised probe transcription activator's RC factor
+    Q_b = X(16);                % normalised probe burdensome OFP's RC factor
+    n_ta = X(17);               % probe's transcription activator protein length
+    n_b = X(18);                % probe's burdensome OFP length
+    mu_b = X(19);               % probe's burdensome OFP maturation rate
+    baseline_tai_dna = X(20);   % baseline expression of the burdnesome gene
+    K_ta_i = X(21);             % half-saturation constant for the binding between the inducer and the activator protein
+    K_tai_dna = X(22);          % half-saturation constant for the binding between the protein-inducer complex and the promoter DNA
+    eta_tai_dna = X(23);        % cooperativity coefficicient of complex-DNA binding
     % controller parameters
-    Kp = X(29);     % proportional feedback gain
-    max_u = X(30);  % maximum inducer concentration which can be supplied
+    Kp = X(24);     % proportional feedback gain
+    max_u = X(25);  % maximum inducer concentration which can be supplied
+    ref = X(26);    % control reference
 
     % calculate the external input (assume no delay)
     u_unclipped = Kp*(ref-ofp_mature);  % get the proportional feedback signal as calculated

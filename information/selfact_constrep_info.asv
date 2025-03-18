@@ -63,7 +63,12 @@ Q_constrep_ss=zeros(size(constrep_qs)); % NORMALISED RC factors to be recorded
 % outputs
 ofp_mature_ss=zeros(size(constrep_qs)); % switch OFP
 ofp2_mature_ss=zeros(size(constrep_qs));    % reporter OFP
-% relevant (i.e. output) sensitivites - element indexing is (experiment, output, parameter)
+% sensitivities
+dofp_dQswitch=zeros(size(constrep_qs)); % sensitivity of switch OFP to switch gene RC factor
+dofp_dQofp=zeros(size(constrep_qs)); % sensitivity of switch OFP to OFP RC factor
+dofp2_dQswitch=zeros(size(constrep_qs)); % sensitivity of reporter OFP to switch gene RC factor
+dofp2_dQofp=zeros(size(constrep_qs)); % sensitivity of reporter OFP to OFP RC factor
+% all relevant sensitivites - element indexing is (experiment, output, parameter)
 DYDU_relevant=zeros(size(constrep_qs,2),2,3);
 
 for i=1:size(constrep_qs,2)
@@ -91,7 +96,13 @@ for i=1:size(constrep_qs,2)
     % record outputs
     ofp_mature_ss(i) = Y(end,6);  % switch OFP
     ofp2_mature_ss(i) = Y(end,7); % reporter OFP
-    % record relevant sensitivities
+    % record sensitivities
+    dofp_dQswitch(i) = DYDU(end,6,1);   % sensitivity of switch OFP to switch gene RC factor
+    dofp_dQofp(i) = DYDU(end,6,2);         % sensitivity of switch OFP to OFP RC factor
+    dofp2_dQswitch(i) = DYDU(end,7,1);     % sensitivity of reporter OFP to switch gene RC factor
+    dofp2_dQofp(i) = DYDU(end,7,2);        % sensitivity of reporter OFP to OFP RC factor
+    
+    % record all relevant sensitivities
     DYDU_relevant(i,:,:)=DYDU(end,6:7,:);
 end
 
@@ -112,27 +123,47 @@ ylabel('ofp_{mature}, switch output','FontName','Arial')
 % specify the measurement noise's stdev for both OFPs
 sigma=50;
 
-FIM = zeros(size(U,1),size(U,1));
+% find entries element-wise
+FIM_Qswitch_Qswitch = 1./(sigma.^2) .*sum( ...
+    dofp_dQswitch.*dofp_dQswitch + ...
+    dofp2_dQswitch.*dofp2_dQswitch);
+
+FIM_Qswitch_Qofp = 1./(sigma.^2) .*sum( ...
+            dofp_dQswitch.*dofp_dQofp + ...
+            dofp2_dQswitch.*dofp2_dQofp);
+
+FIM_Qofp_Qofp = 1./(sigma.^2) .*sum( ...
+            dofp_dQofp.*dofp_dQofp + ...
+            dofp2_dQofp.*dofp2_dQofp);
+
+% gather the entires into a single matrix
+FIM=[FIM_Qswitch_Qswitch, FIM_Qswitch_Qofp;
+    FIM_Qswitch_Qofp, FIM_Qofp_Qofp];
+
+disp(FIM)
+
+%% CALCULATE the FIM using a generic formula
+
+sigma=50;
+
+FIM_generic=zeros()
 for param1_cntr=1:size(U,1)
     for param2_cntr=1:size(U,1)
         sum_output_sensitivities=0;
         for exp_cntr=1:size(constrep_qs,2)
             for output_cntr=1:2
-                sum_output_sensitivities = sum_output_sensitivities + 1./(sigma.^2) .*(...
-                    DYDU_relevant(exp_cntr,output_cntr,param1_cntr).* ...
-                    DYDU_relevant(exp_cntr,output_cntr,param2_cntr) ...
-                    );
+                sum_output_sensitivities = (sum_output_sensitivities + ...
+                    DYDU_relevant(exp_cntr,output_cntr,param1_cntr)* ...
+                    DYDU_relevant(exp_cntr,output_cntr,param2_cntr));
             end
         end
-        FIM(param1_cntr,param2_cntr)=sum_output_sensitivities;
+        F
     end
 end
 
-disp(FIM)
-
 %% CALCULATE the FIM's determinant
 
-disp(det(FIM(1:2,1:2)))
+disp(det(FIM))
 
 %% FUNCTION: append parameters to the initial condition
 function Y0_with_par = append_par(Y0, par)

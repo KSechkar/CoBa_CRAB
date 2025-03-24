@@ -574,7 +574,7 @@ def find_equilibria_for_Q_sas_range_id(Q_sas_range,  # range of burdens from oth
     Q_sas_max = Q_switch_max + Q_ofp_max
 
     # get the switch gene's transcription regulation function values corresponding to the Q_sas_range values
-    F_switch_range = Q_sas_range / Q_sas_max
+    F_switch_range = jnp.minimum(Q_sas_range / Q_sas_max,jnp.ones_like(Q_sas_range))
 
     # get the corresponding switch protein levels
     p_switch_range = pswitch_from_F_id(F_switch_range,

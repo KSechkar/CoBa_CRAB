@@ -12,12 +12,11 @@ close all
 
 %% true parameters
 load("constrep_data.mat")
+load('par_data.mat')
 
 U_true=[par('q_switch')./(par('q_r')+par('q_o'));
     par('q_ofp')./(par('q_r')+par('q_o'));
     par('n_switch');
-    par('n_ofp');
-    par('mu_ofp');
     par('baseline_switch');
     par('K_switch');
     par('eta_switch');
@@ -54,8 +53,8 @@ Par_info.mu=U0; % means of prior distribution
 Par_info.cov=covar0; % covariances of prior distribution (parameters distributed independently)
 
 % Boundaries of parameter value domains
-Par_info.min = U_true/50;
-Par_info.max = U_true*50;
+Par_info.min = U_true/2;
+Par_info.max = U_true*2;
 Par_info.boundhandling = 'fold'; % handle samples out of bounds by imagaing the domain as a torus, upholding MCMC detailed balance
 
 % do not output diagnostic

@@ -16,8 +16,7 @@ function dXdt = selfact_constrep_ode( ...
     mu_ofp = U(5);          % switch OFP maturation rate
     baseline_switch = U(6); % baseline expression of switch gene
     K_switch = U(7);        % half-saturation constant for the switch protein's self-regulation
-    I_switch = U(8);        % share of switch proteins bound by an inducer molecule
-    eta_switch = U(9);      % cooperativity coefficicient of switch protein-DNA binding
+    eta_switch = U(8);      % cooperativity coefficicient of switch protein-DNA binding
 
     % unpack the dynamic variables from the state vector (all entries are specie concentrations in nM)
     R=X(1);             % ribosomes
@@ -35,11 +34,13 @@ function dXdt = selfact_constrep_ode( ...
     q_r = X(10);    % resource demand of ribosomal genes
     n_r = X(11);    % protein length (aa) of ribosomes
     q_o = X(12);    % resource demand of other native genes
-    n_o = X(13);    % protein length (aa) of other native proteins    
+    n_o = X(13);    % protein length (aa) of other native proteins
     % constitutive reporter parameters
     Q_ofp2 = X(14);     % reporter RC factor
     n_ofp2 = X(15);     % reporter OFP length
     mu_ofp2 = X(16);    % reporter OFP maturation rate
+    % switch parameters
+    I_switch = X(17);
     
     % calculate the switch (and switch ofp) genes' regulatory function
     F_switch = F_switch_calc(p_switch, ...

@@ -17,8 +17,7 @@ function dXdt = selfact_constrep_ode( ...
     mu_ofp = U(5);          % switch OFP maturation rate
     baseline_switch = U(6); % baseline expression of switch gene
     K_switch = U(7);        % half-saturation constant for the switch protein's self-regulation
-    I_switch = U(8);        % share of switch proteins bound by an inducer molecule
-    eta_switch = U(9);      % cooperativity coefficicient of switch protein-DNA binding
+    eta_switch = U(8);      % cooperativity coefficicient of switch protein-DNA binding
 
     % unpack the dynamic variables from the state vector (all entries are specie concentrations in nM)
     R=X(1);             % ribosomes
@@ -52,6 +51,8 @@ function dXdt = selfact_constrep_ode( ...
     Kp = X(24);     % proportional feedback gain
     max_u = X(25);  % maximum inducer concentration which can be supplied
     ref = X(26);    % control reference
+    % switch parameters
+    I_switch = X(27);
 
     % calculate the external input (assume no delay)
     u_unclipped = Kp*(ref-ofp_mature);  % get the proportional feedback signal as calculated

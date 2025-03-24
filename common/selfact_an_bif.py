@@ -525,46 +525,72 @@ def find_equilibria_for_Q_osynth_range(Q_osynth_range, # range of burdens from o
 
 # PARAMETER IDENTIFICATION (BASIC MODEL ONLY!!!) -----------------------------------------------------------------------
 # fitting cost function for observed steady-state (Q_sas, Q_osynth) pairs
-def id_cost(Q_sas_steady_states, Q_osynth_steady_states,    # measured steady-state burdens exerted and experienced by the switch
+#%%
+def id_cost(Q_sas_steady_states, Q_osynth_steady_states,
+            # measured steady-state burdens exerted and experienced by the switch
             par, cellvars,  # general system parameters and steady-state cellular variables
             fitted_parvec  # vector of switch parameters being fitted
             ):
     return jnp.sum(jnp.square(Q_osynth_steady_states -
-                              find_equilibria_for_Q_sas_range_id(Q_sas_steady_states, par, cellvars, fitted_parvec)
+                              find_equilibria_for_Q_sas_range_id(Q_sas_steady_states, par,
+                                                                 fitted_parvec[0], fitted_parvec[1], fitted_parvec[2],
+                                                                 fitted_parvec[3], fitted_parvec[4], fitted_parvec[5],
+                                                                 fitted_parvec[6])
                               ))
 
-# find Q_osynth values on the bifurcation curves for the given Q_sas values and given set of switch parameters being fitted
+
+def pswitch_from_F_id(F,
+                      K_switch,
+                      I_switch,
+                      baseline_switch,
+                      eta_switch
+                      ):
+    return jnp.where(jnp.logical_and(F>=baseline_switch,eta_switch>=0.0),
+                      (K_switch / I_switch) * ((F-baseline_switch) / (1 - F)) ** (1/eta_switch),
+               jnp.zeros_like(F)
+               )
+
+
 def find_equilibria_for_Q_sas_range_id(Q_sas_range,  # range of burdens from other genes to consider
-                                            par, cellvars,  # general system parameters and steady-state cellular variables
-                                            fitted_parvec  # vector of switch parameters being fitted
-                                            ):
+                                       par,
+                                       Q_switch_max,
+                                       Q_ofp_max,
+                                       n_switch,
+                                       K_switch,
+                                       I_switch,
+                                       baseline_switch,
+                                       eta_switch
+                                       ):
     # unpack the parameters being fitted
-    Q_switch_max = fitted_parvec[0]  # normalised switch gene burden
-    Q_ofp_max = fitted_parvec[1]  # normalised switch's output fluorescent protein gene burden
-    n_switch = fitted_parvec[2]  # switch protein length
-    n_ofp = fitted_parvec[3]  # switch OFP length
-    mu_ofp = fitted_parvec[4]  # switch OFP maturation rate
-    baseline_switch = fitted_parvec[5]  # baseline expression of switch gene
-    K_switch = fitted_parvec[6]  # half-saturation constant for the switch protein's self-regulation
-    I_switch = fitted_parvec[7]  # share of switch proteins bound by an inducer molecule
-    eta_switch = fitted_parvec[8]  # cooperativity coefficicient of switch protein-DNA binding
+    # Q_switch_max = fitted_parvec[0]  # normalised switch gene burden
+    # Q_ofp_max = fitted_parvec[1]  # normalised switch's output fluorescent protein gene burden
+    # n_switch = fitted_parvec[2]  # switch protein length
+    # K_switch = fitted_parvec[3]  # half-saturation constant for the switch protein's self-regulation
+    # I_switch = fitted_parvec[4]  # share of switch proteins bound by an inducer molecule
+    # baseline_switch = fitted_parvec[5]  # baseline expression of switch gene
+    # eta_switch = fitted_parvec[6]  # cooperativity coefficicient of switch protein-DNA binding
 
     # get the maximum burden from the self-activating switch
-    Q_sas_max=Q_switch_max+Q_ofp_max
+    Q_sas_max = Q_switch_max + Q_ofp_max
 
     # get the switch gene's transcription regulation function values corresponding to the Q_sas_range values
-    F_switch_range = Q_sas_range/Q_sas_max
+    F_switch_range = Q_sas_range / Q_sas_max
 
     # get the corresponding switch protein levels
-    p_switch_range=pswitch_from_F(F_switch_range, par)
+    p_switch_range = pswitch_from_F_id(F_switch_range,
+                                       K_switch,
+                                       I_switch,
+                                       baseline_switch,
+                                       eta_switch
+                                       )
 
     # get the corresponding Q_osynth levels
     Q_osynth_range = -1 + jnp.multiply(jnp.multiply(F_switch_range, Q_sas_max / p_switch_range),
-                                       par['M'] / par['n_switch'] * Q_switch_max / Q_sas_max - p_switch_range
+                                       par['M'] / n_switch * Q_switch_max / Q_sas_max - p_switch_range
                                        )
 
     # return
-    return Q_osynth_range
+    return jnp.fmax(jnp.fmin(Q_osynth_range,jnp.ones_like(Q_osynth_range)),jnp.zeros_like(Q_osynth_range))
 
 
 # MAIN FUNCTION (FOR TESTING) ------------------------------------------------------------------------------------------

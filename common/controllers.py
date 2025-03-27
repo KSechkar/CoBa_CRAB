@@ -106,7 +106,7 @@ def cci_update(t, x,  # time, cell state
                ):
     return jnp.array([
         # fluorescence measurement
-        x[modules_name2pos['p_ofp']]
+        x[modules_name2pos[ctrled_var]],
     ])
 
 
@@ -205,7 +205,7 @@ def ciref_update(t, x,  # time, cell state
                  ):
     return jnp.array([
         # fluorescence measurement
-        x[modules_name2pos['p_ofp']]
+        x[modules_name2pos[ctrled_var]]
     ])
 
 

@@ -356,6 +356,7 @@ def sas_initialise():
     # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
     circuit_styles['colours']['switch'] = '#de3163ff'
     circuit_styles['colours']['ofp'] = '#00af00ff'
+    circuit_styles['colours']['ofp_mature'] = '#00af00ff'
     # -------- ...TO HERE
 
     return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
@@ -635,3 +636,290 @@ def cicc_specterms(x, par, name2pos):
         jnp.array([0.0]), # 1) the cell model would have mRNA concentration here, here this term is just for consistency
         0.0 # 2) mature ofp2 degradation - not considered, this term is just for consistency
     )
+
+# SECOND CHEMICALLY INDUCED GENE (FIXED INPUTS) -----------------------------------------------------------------------------
+def cifi_initialise():
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    # names of genes in the circuit
+    genes = ['ta2',  # transcription activation factor
+             'ta3',
+             'ta4',
+             'b2']  # burdensome controlled gene
+    # names of miscellaneous species involved in the circuit (none)
+    miscs = ['b2_mature']  # mature burdensome protein
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['p_' + genes[i]] = 8 + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['q_' + genes[i]] = i  # resource demands (in q_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes:  # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['q_' + gene] = 1.0  # resource demand (unitless)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par['d_' + gene] = 0.0  # rate of active protein degradation - zero by default (/h)
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # transcription regulation function
+    default_par['K_ta2-i'] = 100  # dissociation constant of the ta-inducer binding
+    default_par['K_ta2i-dna'] = 100  # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_ta2i-dna'] = 2  # Hill coefficient of the ta protein binding to the DNA
+    default_par['baseline_ta2i-dna'] = 0.1  # baseline expression of the burdensome gene
+    default_par['u2']=0.0
+    #
+    default_par['K_ta3-i'] = 100  # dissociation constant of the ta-inducer binding
+    default_par['K_ta3i-dna'] = 100  # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_ta3i-dna'] = 2  # Hill coefficient of the ta protein binding to the DNA
+    default_par['baseline_ta2i-dna'] = 0.1  # baseline expression of the burdensome gene
+    default_par['u3']=0.0
+    #
+    default_par['K_ta4-i'] = 100  # dissociation constant of the ta-inducer binding
+    default_par['K_ta4i-dna'] = 100  # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_ta4i-dna'] = 2  # Hill coefficient of the ta protein binding to the DNA
+    default_par['baseline_ta4i-dna'] = 0.1  # baseline expression of the burdensome gene
+    default_par['u4'] = 0.0
+
+    # (fluorescent) mature burdensome protein parameters
+    default_par['mu_b2'] = 1 / (13.6 / 60)  # sfGFP maturation time of 13.6 min
+    default_par['n_b2_mature'] = default_par['n_b2']  # protein length - same as the freshly synthesised protein
+    default_par['d_b2_mature'] = default_par['d_b2']  # mature ofp degradation rate - same as the freshly synthesised protein
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    # gene styles
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    # miscellaneous species styles
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    circuit_styles['colours']['ta2'] = '#de3163ff'
+    circuit_styles['colours']['ta3'] = 'dodgerblue'
+    circuit_styles['colours']['b2'] = '#00af00ff'
+    circuit_styles['colours']['b2_mature'] = '#00af00ff'
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
+
+# transcription regulation functions
+def cifi_F_calc(t ,x,
+                u,  # controller input: external inducer concentration
+                par, name2pos):
+    F_ta2 = 1 # constitutive gene
+
+    # burdensome gene expression is regulated by the ta protein
+    ta2i_conc = x[name2pos['p_ta2']] * par['u2']/(par['u2']+par['K_ta2-i'])
+    F_ta3 = par['baseline_ta2i-dna'] + (1 - par['baseline_ta2i-dna']) * (ta2i_conc**par['eta_ta2i-dna'])/(ta2i_conc**par['eta_ta2i-dna']+par['K_ta2i-dna']**par['eta_ta2i-dna'])
+    #
+    ta3i_conc = x[name2pos['p_ta3']] * par['u3']/(par['u3']+par['K_ta3-i'])
+    F_ta4 = par['baseline_ta3i-dna'] + (1 - par['baseline_ta3i-dna']) * (ta3i_conc**par['eta_ta3i-dna'])/(ta3i_conc**par['eta_ta3i-dna']+par['K_ta3i-dna']**par['eta_ta3i-dna'])
+    #
+    ta4i_conc = x[name2pos['p_ta4']] * par['u4']/(par['u4']+par['K_ta4-i'])
+    F_b = par['baseline_ta4i-dna'] + (1 - par['baseline_ta4i-dna']) * (ta4i_conc**par['eta_ta4i-dna'])/(ta4i_conc**par['eta_ta4i-dna']+par['K_ta4i-dna']**par['eta_ta4i-dna'])
+    return jnp.array([F_ta2,
+                      F_ta3,
+                      F_ta4,
+            F_ta4])
+
+# ODE
+def cifi_ode(F_calc,  # calculating the transcription regulation functions
+                t, x,  # time, cell state
+                u,  # controller input
+                e, l,  # translation elongation rate, growth rate
+                R,  # ribosome count in the cell, resource
+                q_het, D,  # resource demands for synthetic genes, resource competition denominator
+                par,  # system parameters
+                name2pos  # name to position decoder
+                ):
+    # GET REGULATORY FUNCTION VALUES
+    F = F_calc(t, x, u, par, name2pos)
+
+    # RETURN THE ODE
+    return [# proteins
+            (e / par['n_ta2']) * (F[name2pos['F_ta2']] * par['q_ta2'] / D) * R - l * x[name2pos['p_ta2']],
+            (e / par['n_ta3']) * (F[name2pos['F_ta3']] * par['q_ta3'] / D) * R - l * x[name2pos['p_ta3']],
+            (e / par['n_ta4']) * (F[name2pos['F_ta4']] * par['q_ta4'] / D) * R - l * x[name2pos['p_ta4']],
+            (e / par['n_b2']) * (F[name2pos['F_b2']] * par['q_b2'] / D) * R - l * x[name2pos['p_b2']] - par['mu_b2'] * x[name2pos['p_b2']],
+            # mature fluorescent proteins
+            par['mu_b2']*x[name2pos['p_b2']] - l*x[name2pos['b2_mature']]
+            ]
+
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def cifi_specterms(x, par, name2pos):
+    return (
+        jnp.array([0.0]), # 1) the cell model would have mRNA concentration here, here this term is just for consistency
+        0.0 # 2) mature ofp2 degradation - not considered, this term is just for consistency
+    )
+
+# TOGGLE SWITCH --------------------------------------------------------------------------------------------------------
+def toggle_initialise():
+    # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
+    # names of genes in the circuit
+    genes = ['tog1',  # first transcription repression factor
+             'tog2',  # second transcription repression factor
+             'ofp1',  # burdensome reporter co-regulated with tog1
+             'ofp2']  # burdensome reporter co-regulated with tog2
+    # names of miscellaneous species involved in the circuit (none)
+    miscs = ['ofp1_mature',  # mature ofp1
+             'ofp2_mature']  # mature ofp2
+    # -------- ...TO HERE
+
+    # for convenience, one can refer to the species' concs. by names instead of positions in x
+    # e.g. x[name2pos['m_b']] will return the concentration of mRNA of the gene 'b'
+    name2pos = {}
+    for i in range(0, len(genes)):
+        name2pos['p_' + genes[i]] = 8 + i  # protein
+    for i in range(0, len(miscs)):
+        name2pos[miscs[i]] = 8 + len(genes) + i  # miscellaneous species
+    for i in range(0, len(genes)):
+        name2pos['q_' + genes[i]] = i  # resource demands (in q_het, not x!!!)
+    for i in range(0, len(genes)):
+        name2pos['F_' + genes[i]] = i  # transcription regulation functions (in F, not x!!!)
+
+    # default gene parameters to be imported into the main model's parameter dictionary
+    default_par = {}
+    for gene in genes:  # gene parameters
+        default_par['func_' + gene] = 1.0  # gene functionality - 1 if working, 0 if mutated
+        default_par['q_' + gene] = 1.0  # resource demand (unitless)
+        default_par['n_' + gene] = 300.0  # protein length (aa)
+        default_par['d_' + gene] = 0.0  # rate of active protein degradation - zero by default (/h)
+
+    # default initial conditions
+    default_init_conds = {}
+    for gene in genes:
+        default_init_conds['p_' + gene] = 0
+    for misc in miscs:
+        default_init_conds[misc] = 0
+
+    # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
+    # tog2 and ofp2 transcription regulation function
+    default_par['I_tog2'] = 1  # share of tog1 protein bound by the inducer of the tog2 gene (0<=I<=1)
+    default_par['K_tog1-dna'] = 100  # dissociation constant of the FREE tog1 protein from the tog2 promoter DNA
+    default_par['eta_tog1-dna'] = 2  # Hill coefficient of the FREE tog1 protein binding to the tog2 promoter DNA
+    default_par['baseline_tog2'] = 0.1  # baseline expression of the tog2 gene
+
+    # tog1 and ofp1 transcription regulation function
+    default_par['I_tog1'] = 1  # share of tog2 protein bound by the inducer of the tog1 gene (0<=I<=1)
+    default_par['K_tog2-dna'] = 100  # dissociation constant of the FREE tog2 protein from the tog1 promoter DNA
+    default_par['eta_tog2-dna'] = 2  # Hill coefficient of the FREE tog2 protein binding to the tog1 promoter DNA
+    default_par['baseline_tog1'] = 0.1 # baseline expression of the tog1 gene
+
+    # output fluorescent protein maturation
+    default_par['mu_ofp1'] = 1 / (13.6 / 60)  # maturation time of 13.6 min
+    default_par['n_ofp1_mature'] = default_par['n_ofp1']  # protein length - same as the freshly synthesised protein
+    default_par['d_ofp1_mature'] = default_par['d_ofp1']  # mature ofp degradation rate - same as the freshly synthesised protein
+    default_par['mu_ofp2'] = 1 / (13.6 / 60)
+    default_par['n_ofp2_mature'] = default_par['n_ofp2']
+    default_par['d_ofp2_mature'] = default_par['d_ofp2']
+
+    # -------- ...TO HERE
+
+    # default palette and dashes for plotting (5 genes + misc. species max)
+    default_palette = ["#de3163ff", '#ff6700ff', '#48d1ccff', '#bb3385ff', '#fcc200ff']
+    default_dash = ['solid']
+    # match default palette to genes and miscellaneous species, looping over the five colours we defined
+    circuit_styles = {'colours': {}, 'dashes': {}}  # initialise dictionary
+    # gene styles
+    for i in range(0, len(genes)):
+        circuit_styles['colours'][genes[i]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][genes[i]] = default_dash[i % len(default_dash)]
+    # miscellaneous species styles
+    for i in range(len(genes), len(genes) + len(miscs)):
+        circuit_styles['colours'][miscs[i - len(genes)]] = default_palette[i % len(default_palette)]
+        circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
+
+    # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
+    circuit_styles['colours']['tog1'] = '#de3163ff'
+    circuit_styles['colours']['ofp1'] = '#00af00ff'
+    circuit_styles['colours']['ofp1_mature'] = '#00af00ff'
+    circuit_styles['colours']['tog2'] = 'firebrick'
+    circuit_styles['colours']['ofp2'] = 'peru'
+    circuit_styles['colours']['ofp2_mature'] = 'peru'
+    # -------- ...TO HERE
+
+    return default_par, default_init_conds, genes, miscs, name2pos, circuit_styles
+
+
+# transcription regulation functions
+def toggle_F_calc(t, x, u, par, name2pos):
+    # tog2 and ofp2 transcription regulation function
+    # tog1 protein-dependent term - the concentration of active (free) tog1 proteins divided by DNA binding half-saturation constant
+    p_tog1_term = (x[name2pos['p_tog1']] * (1-par['I_tog2'])) / par['K_tog1-dna']
+    # switch protein regulation function
+    F_tog2 = par['baseline_tog2'] + (1 - par['baseline_tog2']) * 1 / (p_tog1_term ** par['eta_tog1-dna'] + 1)
+
+    # tog1 and ofp1 transcription regulation function
+    # tog2 protein-dependent term - the concentration of active (free) tog2 proteins divided by DNA binding half-saturation constant
+    p_tog2_term = (x[name2pos['p_tog2']] * (1-par['I_tog1'])) / par['K_tog2-dna']
+    # switch protein regulation function
+    F_tog1 = par['baseline_tog1'] + (1 - par['baseline_tog1']) * 1 / (p_tog2_term ** par['eta_tog2-dna'] + 1)
+
+    return jnp.array([
+        F_tog1, # toggle 1 gene regulation function
+        F_tog2, # toggle 2 gene regulation function
+        F_tog1, # ofp1 co-expressed with the tog1 gene from the same protein
+        F_tog2  # ofp2 co-expressed with the tog2 gene from the same protein
+    ])
+
+
+# ODE
+def toggle_ode(F_calc,  # calculating the transcription regulation functions
+            t, x,  # time, cell state
+            u,  # controller input
+            e, l,  # translation elongation rate, growth rate
+            R,  # ribosome count in the cell, resource
+            q_het, D,  # resource demands for synthetic genes, resource competition denominator
+            par,  # system parameters
+            name2pos  # name to position decoder
+            ):
+    # GET REGULATORY FUNCTION VALUES
+    F = F_calc(t, x, u, par, name2pos)
+
+    # RETURN THE ODE
+    return [  # proteins
+        (e / par['n_tog1']) * (F[name2pos['F_tog1']] * par['q_tog1'] / D) * R - l * x[name2pos['p_tog1']],
+        (e / par['n_tog2']) * (F[name2pos['F_tog2']] * par['q_tog2'] / D) * R - l * x[name2pos['p_tog2']],
+        (e / par['n_ofp1']) * (F[name2pos['F_ofp1']] * par['q_ofp1'] / D) * R - l * x[name2pos['p_ofp1']] - par['mu_ofp1'] * x[name2pos['p_ofp1']],
+        (e / par['n_ofp2']) * (F[name2pos['F_ofp2']] * par['q_ofp2'] / D) * R - l * x[name2pos['p_ofp2']] - par['mu_ofp2'] * x[name2pos['p_ofp2']],
+        # mature fluorescent proteins
+        par['mu_ofp1'] * x[name2pos['p_ofp1']] - l * x[name2pos['ofp1_mature']],
+        par['mu_ofp2'] * x[name2pos['p_ofp2']] - l * x[name2pos['ofp2_mature']],
+    ]
+
+
+# specific terms of ODEs and cellular process rate definitions
+# 1) effective mRNA concentrations for genes expressed from the same operon with some others
+# 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
+def toggle_specterms(x, par, name2pos):
+    return (
+        jnp.array([0.0]),
+        # 1) the cell model would have mRNA concentration here, here this term is just for consistency
+        0.0  # 2) mature ofp2 degradation - not considered, this term is just for consistency
+    )
+

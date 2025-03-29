@@ -45,7 +45,7 @@ Probe module:
 | $\eta_{tai,b}$           | Cooperativity of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA            | $2$               | None             |
 | $F_{b,0}$                | Baseline output gene expression <br> in absence of transcription activators                                               | $0.01$            | None             |
 
-Module of interest (self-activaing genetic switch):
+Module of interest (self-activating genetic switch):
 
 | Parameter               | Description                                                                                                         | Value             | Units            | 
 |:------------------------|:--------------------------------------------------------------------------------------------------------------------|:------------------|:-----------------| 

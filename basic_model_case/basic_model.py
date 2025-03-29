@@ -1104,18 +1104,6 @@ def main():
     jax.config.update('jax_platform_name', 'cpu')
     jax.config.update("jax_enable_x64", True)
 
-    # chemically cybercontrolled probe
-    # basic_circ_par={}
-    # basic_circ_par['q_switch'] = 125.0  # resource competition factor for the switch gene
-    # basic_circ_par['q_ofp_div_q_switch'] = 100.0  # ratio of the ofp's RC factor to that of the switch - defined like that due to co-expression from the same operon
-    # basic_circ_par['baseline_switch'] = 0.05
-    # basic_circ_par['K_switch'] = 250.0
-    # basic_circ_par['I_switch'] = 0.1
-    # basic_circ_par['q_ta'] = 45.0  # RC factor for the transcription activation factor
-    # basic_circ_par['q_b'] = 6e4  # RC factor for the burdensome gene of the probe
-    # basic_circ_par['mu_b'] = 1 / (13.6 / 60)
-    # basic_circ_par['baseline_tai-dna'] = 0.01
-
     basic_circ_par = {}
     basic_circ_par['q_ofp'] = 125.0
     basic_circ_par['q_ofp2'] = 30062.5

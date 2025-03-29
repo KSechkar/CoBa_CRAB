@@ -57,9 +57,9 @@ The program files include:
   - Analytical and data processing tools:
     - _probe_char_tools.py_ - data processing functions which enable the probe characterisation step.
     - _selfact_an_bif.py_ - functions enabling the analytical retrieval of a bifurcation diagram 
-    for a self-activating genetic switch (example module-of-interest in our simulations).
-    - _selfact_jointexp.py_ - data processing functions for predicting, based on module-of-interest
-    characterisation outcomes, how two self-activating genetic switches will behave when found
+    for a self-activating genetic switch (example module of interest in our simulations).
+    - __jointexp.py_ - data processing functions for predicting, based on
+    characterisation outcomes, how modules of interest will behave when found
     together in the same host cell.
 
 ## System requirements

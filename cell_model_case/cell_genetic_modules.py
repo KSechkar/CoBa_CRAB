@@ -192,7 +192,7 @@ def constfp_initialise():
         default_init_conds[misc] = 0
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
-    default_par['mu_ofp']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['mu_ofp']=np.log(2)/(13.6/60)   # sfGFP maturation time of 13.6 min
     default_par['n_ofp_mature'] = default_par['n_ofp'] # protein length - same as the freshly synthesised protein
     default_par['d_ofp_mature'] = default_par['d_ofp']  # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
@@ -315,7 +315,7 @@ def constfp2_initialise():
         default_init_conds[misc] = 0
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
-    default_par['mu_ofp2']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['mu_ofp2']=np.log(2)/(13.6/60)   # sfGFP maturation time of 13.6 min
     default_par['n_ofp2_mature'] = default_par['n_ofp2'] # protein length - same as the freshly synthesised protein
     default_par['d_ofp2_mature'] = default_par['d_ofp2']  # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
@@ -383,7 +383,7 @@ def constfp2_specterms(x, par, name2pos):
 def sas_initialise():
     # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
     # names of genes in the circuit
-    genes = ['switch',  # self0activating swich
+    genes = ['s',  # self0activating swich
              'ofp']  # burdensome controlled gene
     # names of miscellaneous species involved in the circuit (none)
     miscs = ['ofp_mature']  # mature ofp
@@ -441,13 +441,13 @@ def sas_initialise():
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
-    default_par['I_switch'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
-    default_par['K_switch'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_switch'] = 2 # Hill coefficient of the ta protein binding to the DNA
-    default_par['baseline_switch'] = 0.1 # baseline expression of the burdensome gene
+    default_par['I_s'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
+    default_par['K_s,s'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_s,s'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['F_s,0'] = 0.1 # baseline expression of the burdensome gene
 
     # output fluorescent protein maturation rate
-    default_par['mu_ofp']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['mu_ofp']=np.log(2)/(13.6/60)   # sfGFP maturation time of 13.6 min
     default_par['n_ofp_mature'] = default_par['n_ofp']  # protein length - same as the freshly synthesised protein
     default_par['d_ofp_mature']=default_par['d_ofp'] # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
@@ -465,7 +465,7 @@ def sas_initialise():
         circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
 
     # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
-    circuit_styles['colours']['switch'] = '#de3163ff'
+    circuit_styles['colours']['s'] = '#de3163ff'
     circuit_styles['colours']['ofp'] = '#00af00ff'
     circuit_styles['colours']['ofp_mature'] = '#00af00ff'
     # -------- ...TO HERE
@@ -478,12 +478,12 @@ def sas_F_calc(t ,x,
                 par, name2pos):
 
     # switch protein-dependent term - the concentration of active (inducer-bound) switch proteins divided by half-saturation constant
-    p_switch_term = (x[name2pos['p_switch']] * par['I_switch'])/par['K_switch']
+    p_s_term = (x[name2pos['p_s']] * par['I_s'])/par['K_s,s']
 
-    F_switch = par['baseline_switch'] + (1 - par['baseline_switch']) * (p_switch_term**par['eta_switch'])/(p_switch_term**par['eta_switch']+1)
+    F_s = par['F_s,0'] + (1 - par['F_s,0']) * (p_s_term**par['eta_s,s'])/(p_s_term**par['eta_s,s']+1)
     return jnp.array([
-        F_switch,
-        F_switch    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
+        F_s,
+        F_s    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
     ])
 
 # ODE
@@ -502,14 +502,14 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
 
     # ofp reporter co-expressed from the same operon as the switch => same mRNA conc., up to scaling for multiple-ribosome translation
     # commented out as NOW TREATED USING SAS_SPECTERMS FUNCTION!
-    # m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
+    # m_ofp = x[name2pos['m_s']]*par['n_ofp']/par['n_s']
 
     # RETURN THE ODE
     return [# mRNAs
-            par['func_switch'] * l * F[name2pos['F_switch']] * par['c_switch'] * par['a_switch'] - (par['b_switch'] + l) * x[name2pos['m_switch']],
+            par['func_s'] * l * F[name2pos['F_s']] * par['c_s'] * par['a_s'] - (par['b_s'] + l) * x[name2pos['m_s']],
             0,  # ofp co-expressed with the switch
             # proteins
-            (e / par['n_switch']) * (x[name2pos['m_switch']] / k_het[name2pos['k_switch']] / D) * R - (l + par['d_switch']*p_prot) * x[name2pos['p_switch']],
+            (e / par['n_s']) * (x[name2pos['m_s']] / k_het[name2pos['k_s']] / D) * R - (l + par['d_s']*p_prot) * x[name2pos['p_s']],
             (e / par['n_ofp']) * (x[name2pos['m_ofp']] / k_het[name2pos['k_ofp']] / D) * R - (l + par['d_ofp']*p_prot) * x[name2pos['p_ofp']] -par['mu_ofp']*x[name2pos['p_ofp']],
             # mature ofp
             par['mu_ofp']*x[name2pos['p_ofp']] - (l + par['d_ofp_mature']*p_prot)*x[name2pos['ofp_mature']]
@@ -519,9 +519,9 @@ def sas_ode(F_calc,     # calculating the transcription regulation functions
 # 1) effective mRNA concentrations for genes expressed from the same operon with some others
 # 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
 def sas_specterms(x, par, name2pos):
-    m_ofp = x[name2pos['m_switch']] * par['n_ofp'] / par['n_switch']
+    m_ofp = x[name2pos['m_s']] * par['n_ofp'] / par['n_s']
     return (
-        jnp.array([x[name2pos['m_switch']], m_ofp]), # 1) ofp co-expressed with the switch gene
+        jnp.array([x[name2pos['m_s']], m_ofp]), # 1) ofp co-expressed with the switch gene
         par['d_ofp_mature']*par['n_ofp']*x[name2pos['ofp_mature']]   # 2) mature ofp still degraded
     )
 
@@ -531,7 +531,7 @@ def sas_specterms(x, par, name2pos):
 def sas2_initialise():
     # -------- SPECIFY CIRCUIT COMPONENTS FROM HERE...
     # names of genes in the circuit
-    genes = ['switch2',  # self0activating swich
+    genes = ['s2',  # self0activating swich
              'ofp2']  # burdensome controlled gene
     # names of miscellaneous species involved in the circuit (none)
     miscs = ['ofp2_mature']
@@ -589,13 +589,13 @@ def sas2_initialise():
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
-    default_par['I_switch2'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
-    default_par['K_switch2'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_switch2'] = 2 # Hill coefficient of the ta protein binding to the DNA
-    default_par['baseline_switch2'] = 0.1 # baseline expression of the burdensome gene
+    default_par['I_s2'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
+    default_par['K_s2,s2'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_s2,s2'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['F_s2,0'] = 0.1 # baseline expression of the burdensome gene
 
     # output fluorescent protein maturation
-    default_par['mu_ofp2']=1/(13.6/60)   # sfGFP maturation time of 13.6 min
+    default_par['mu_ofp2']=np.log(2)/(13.6/60)   # sfGFP maturation time of 13.6 min
     default_par['n_ofp2_mature'] = default_par['n_ofp2']  # protein length - same as the freshly synthesised protein
     default_par['d_ofp2_mature']=default_par['d_ofp2'] # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
@@ -613,7 +613,7 @@ def sas2_initialise():
         circuit_styles['dashes'][miscs[i - len(genes)]] = default_dash[i % len(default_dash)]
 
     # --------  YOU CAN RE-SPECIFY COLOURS FOR PLOTTING FROM HERE...
-    circuit_styles['colours']['switch2'] = '#48d1ccff'
+    circuit_styles['colours']['s2'] = '#48d1ccff'
     circuit_styles['colours']['ofp2'] = '#bb3385ff'
     circuit_styles['colours']['ofp2_mature'] = '#bb3385ff'
     # -------- ...TO HERE
@@ -626,12 +626,12 @@ def sas2_F_calc(t ,x,
                 par, name2pos):
 
     # switch protein-dependent term - the concentration of active (inducer-bound) switch proteins divided by half-saturation constant
-    p_switch_term = (x[name2pos['p_switch2']] * par['I_switch2'])/par['K_switch2']
+    p_s_term = (x[name2pos['p_s2']] * par['I_s2'])/par['K_s2,s2']
 
-    F_switch = par['baseline_switch2'] + (1 - par['baseline_switch2']) * (p_switch_term**par['eta_switch2'])/(p_switch_term**par['eta_switch2']+1)
+    F_s = par['F_s2,0'] + (1 - par['F_s2,0']) * (p_s_term**par['eta_s2,s2'])/(p_s_term**par['eta_s2,s2']+1)
     return jnp.array([
-        F_switch,
-        F_switch    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
+        F_s,
+        F_s    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
     ])
 
 # ODE
@@ -650,14 +650,14 @@ def sas2_ode(F_calc,     # calculating the transcription regulation functions
 
     # ofp reporter co-expressed from the same operon as the switch => same mRNA conc., up to scaling for multiple-ribosome translation
     # commented out as NOW TREATED USING SAS2_SPECTERMS FUNCTION!
-    # m_ofp = x[name2pos['m_switch']]*par['n_ofp']/par['n_switch']
+    # m_ofp = x[name2pos['m_s']]*par['n_ofp']/par['n_s']
 
     # RETURN THE ODE
     return [# mRNAs
-            par['func_switch2'] * l * F[name2pos['F_switch2']] * par['c_switch2'] * par['a_switch2'] - (par['b_switch2'] + l) * x[name2pos['m_switch2']],
+            par['func_s2'] * l * F[name2pos['F_s2']] * par['c_s2'] * par['a_s2'] - (par['b_s2'] + l) * x[name2pos['m_s2']],
             0,  # ofp co-expressed with the switch
             # proteins
-            (e / par['n_switch2']) * (x[name2pos['m_switch2']] / k_het[name2pos['k_switch2']] / D) * R - (l + par['d_switch2']*p_prot) * x[name2pos['p_switch2']],
+            (e / par['n_s2']) * (x[name2pos['m_s2']] / k_het[name2pos['k_s2']] / D) * R - (l + par['d_s2']*p_prot) * x[name2pos['p_s2']],
             (e / par['n_ofp2']) * (x[name2pos['m_ofp2']] / k_het[name2pos['k_ofp2']] / D) * R - (l + par['d_ofp2']*p_prot) * x[name2pos['p_ofp2']] - par['mu_ofp2']*x[name2pos['p_ofp2']],
             # mature ofp2
             par['mu_ofp2']*x[name2pos['p_ofp2']] - (l + par['d_ofp2_mature']*p_prot)*x[name2pos['ofp2_mature']]
@@ -667,9 +667,9 @@ def sas2_ode(F_calc,     # calculating the transcription regulation functions
 # 1) effective mRNA concentrations for genes expressed from the same operon with some others
 # 2) contribution to protein degradation flux from miscellaneous species (normally, mature proteins)
 def sas2_specterms(x, par, name2pos):
-    m_ofp2 = x[name2pos['m_switch2']] * par['n_ofp2'] / par['n_switch2']
+    m_ofp2 = x[name2pos['m_s2']] * par['n_ofp2'] / par['n_s2']
     return (
-        jnp.array([x[name2pos['m_switch2']], m_ofp2]),  # 1) ofp co-expressed with the switch gene
+        jnp.array([x[name2pos['m_s2']], m_ofp2]),  # 1) ofp co-expressed with the switch gene
         par['d_ofp2_mature'] * par['n_ofp2'] * x[name2pos['ofp2_mature']]   # 2) mature ofp degradation per nM protease
     )
 
@@ -736,13 +736,13 @@ def cicc_initialise():
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
-    default_par['K_ta-i'] = 100 # dissociation constant of the ta-inducer binding
-    default_par['K_tai-dna'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_tai-dna'] = 2 # Hill coefficient of the ta protein binding to the DNA
-    default_par['baseline_tai-dna'] = 0.1 # baseline expression of the burdensome gene
+    default_par['K_ta,i'] = 100 # dissociation constant of the ta-inducer binding
+    default_par['K_tai,b'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_tai,b'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['F_b,0'] = 0.1 # baseline expression of the burdensome gene
 
     # (fluorescent) mature burdensome protein parameters
-    default_par['mu_b'] = 1 / (13.6 / 60)  # sfGFP maturation time of 13.6 min
+    default_par['mu_b'] = np.log(2) / (13.6 / 60)  # sfGFP maturation time of 13.6 min
     default_par['n_b_mature'] = default_par['n_b']  # protein length - same as the freshly synthesised protein
     default_par['d_b_mature'] = default_par['d_b']  # mature ofp degradation rate - same as the freshly synthesised protein
     # -------- ...TO HERE
@@ -774,8 +774,8 @@ def cicc_F_calc(t ,x,
     F_ta = 1 # constitutive gene
 
     # burdensome gene expression is regulated by the ta protein
-    tai_conc = x[name2pos['p_ta']] * u/(u+par['K_ta-i'])
-    F_b = par['baseline_tai-dna'] + (1 - par['baseline_tai-dna']) * (tai_conc**par['eta_tai-dna'])/(tai_conc**par['eta_tai-dna']+par['K_tai-dna']**par['eta_tai-dna'])
+    tai_conc = x[name2pos['p_ta']] * u/(u+par['K_ta,i'])
+    F_b = par['F_b,0'] + (1 - par['F_b,0']) * (tai_conc**par['eta_tai,b'])/(tai_conc**par['eta_tai,b']+par['K_tai,b']**par['eta_tai,b'])
     return jnp.array([F_ta,
             F_b])
 

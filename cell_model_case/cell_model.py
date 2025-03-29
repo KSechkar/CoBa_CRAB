@@ -331,7 +331,7 @@ class ModelAuxiliary:
         init_conds['tu'] = 80000.0  # free tRNAs
 
         # nutrient quality s and chloramphenicol concentration h
-        init_conds['s'] = 0.5
+        init_conds['sigma'] = 0.5
         init_conds['h'] = 0.0  # no translation inhibition assumed by default
         return init_conds
 
@@ -356,7 +356,7 @@ class ModelAuxiliary:
             init_conds['tu'],  # uncharged
 
             # culture medium's nutrient quality and chloramphenicol concentration
-            init_conds['s'],  # nutrient quality
+            init_conds['sigma'],  # nutrient quality
             init_conds['h'],  # chloramphenicol levels IN THE CELL
         ]
         # GENETIC MODULES
@@ -482,7 +482,7 @@ class ModelAuxiliary:
             'R': xs[:, 3],  # ribosomal protein
             'tc': xs[:, 4],  # charged tRNA
             'tu': xs[:, 5],  # uncharged tRNA
-            's': xs[:, 6],  # nutrient quality
+            'sigma': xs[:, 6],  # nutrient quality
             'h': xs[:, 7],  # chloramphenicol concentration
             'm_het': m_het,  # heterologous mRNA
             'p_het': p_het,  # heterologous protein

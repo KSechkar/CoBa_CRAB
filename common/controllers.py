@@ -16,7 +16,7 @@ def cci_initialise():
     # -------- SPECIFY CONTROLLER COMPONENTS FROM HERE...
     memos = ['ofp_level']  # names of memory entries, updated with every measurement
     dynvars = ['inducer_level']  # names of dynamic variables, simulated using ODEs
-    ctrled_var = ''  # name of the system's variabled read and steered by the controller - here, none as no feedback
+    ctrled_var = 'ofp_mature'  # name of the system's variabled read and steered by the controller - here, none as no feedback
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in the memory vector or x (for dynvars)
@@ -117,7 +117,7 @@ def ciref_initialise():
     # -------- SPECIFY CONTROLLER COMPONENTS FROM HERE...
     memos = ['ofp_level']  # names of memory entries, updated with every measurement
     dynvars = []  # names of dynamic variables, simulated using ODEs
-    ctrled_var = ''  # name of the system's variabled read and steered by the controller - here, none as no feedback
+    ctrled_var = 'ofp_mature'  # name of the system's variabled read and steered by the controller - here, none as no feedback
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in the memory vector or x (for dynvars)
@@ -326,7 +326,7 @@ def pichem_initialise():
     # -------- SPECIFY CONTROLLER COMPONENTS FROM HERE...
     memos = ['ctrled_fp_level', 'integral']  # names of memory entries, updated with every measurement - fluorescence of the controlled gene, integral of the error
     dynvars = []  # names of dynamic variables, simulated using ODEs
-    ctrled_var = 'p_ofp_mature' # name of the system's variabled read and steered by the controller
+    ctrled_var = 'ofp_mature' # name of the system's variabled read and steered by the controller
     # -------- ...TO HERE
 
     # for convenience, one can refer to the species' concs. by names instead of positions in the memory vector or x (for dynvars)

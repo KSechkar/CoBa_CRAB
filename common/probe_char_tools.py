@@ -197,6 +197,34 @@ def make_interpolator_sp_lnd(mapping_data,  # experimental data for mapping reco
 
     return interpolator
 
+# same as above, but instead of filling undetermined elements being filled with zeros, use nans to omit them in figures
+def make_interpolator_sp_lnd_forfigs(mapping_data,  # experimental data for mapping reconstruction
+                             normalise_u_and_y=True  # whether to normalise u and y values to their range (as u and y scales are different)
+                             ):
+    # unpack the experimental data for mapping reconstruction
+    u_data = np.array(mapping_data[0])
+    y_data = np.array(mapping_data[1])
+    Q_data = np.array(mapping_data[2])
+
+    # get normalising factors for distances in u and y
+    if(normalise_u_and_y):
+        u_norm = np.max(u_data) - np.min(u_data)
+        y_norm = np.max(y_data) - np.min(y_data)
+    else:
+        u_norm = 1.0
+        y_norm = 1.0
+
+    # create a scipy linear ND interpolator
+    sp_lnd_interpolator = sp.interpolate.LinearNDInterpolator(list(zip(u_data, y_data)),
+                                                              Q_data,
+                                                              rescale=normalise_u_and_y,
+                                                              fill_value=np.nan)
+
+    # include normalisation if needed, clip Q to be non-negative
+    interpolator = lambda u, y: sp_lnd_interpolator(u,y)
+
+    return interpolator
+
 # SCIPY CLOUGH-TOCHER
 # return an interpolation function for a mapping from data
 def make_interpolator_sp_clt(mapping_data,  # experimental data for mapping reconstruction

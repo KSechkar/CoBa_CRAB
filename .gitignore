@@ -292,3 +292,5 @@ pyrightconfig.json
 .p
 .pkl
 .npy
+.mat
+.asv

@@ -1,0 +1,8 @@
+jax~=0.4.26
+numpy~=1.26.4
+diffrax~=0.5.1
+jaxopt~=0.8.3
+scipy~=1.14.1
+matplotlib~=3.9.2
+pandas~=2.2.2
+bokeh~=3.4.1

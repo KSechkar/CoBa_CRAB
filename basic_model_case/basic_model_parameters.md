@@ -53,16 +53,17 @@ Module of interest (self-activating genetic switch):
 | $\eta_{s,s}$    | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None  |
 | $F_{s,0}$       | Baseline switch and output gene expression <br> in absence of transcription activators                              | $0.05$            | None  |
 
-$^*$Everywhere except the second genetic switch in
+$^*$ Everywhere except the second genetic switch in
 _basic_model_case/basic_selfact_otherind.py_ (Fig.5d in the manuscript),
 for which $I=1/9$.
 
 Cybergenetic feedback controller (integral feedback implemented in the scripts 
 but currently not used):
 
-| Parameter | Description                | Value             | Units | 
-|:----------|:---------------------------|:------------------|:------| 
-| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$ | None  |
+| Parameter | Description                | Value                                                                                       | Units | 
+|:----------|:---------------------------|:--------------------------------------------------------------------------------------------|:------| 
+| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$                                                                           | None  |
+| $\tau$    | Control delay              | $0.01$ (on the scale of [de Cesare et al. 2022](https://doi.org/10.1021/acssynbio.1c00632)) | $h$   |
 
 
 ### Motivation for host cell parameter values

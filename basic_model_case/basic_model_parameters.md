@@ -60,10 +60,10 @@ for which $I=1/9$.
 Cybergenetic feedback controller (integral feedback implemented in the scripts 
 but currently not used):
 
-| Parameter | Description                | Value                                                                                       | Units | 
-|:----------|:---------------------------|:--------------------------------------------------------------------------------------------|:------| 
-| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$                                                                           | None  |
-| $\tau$    | Control delay              | $0.01$ (on the scale of [de Cesare et al. 2022](https://doi.org/10.1021/acssynbio.1c00632)) | $h$   |
+| Parameter | Description                | Value                    | Units | 
+|:----------|:---------------------------|:-------------------------|:------| 
+| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$        | None  |
+| $\tau$    | Control delay              | $0.01$                   | $h$   |
 
 
 ### Motivation for host cell parameter values
@@ -105,6 +105,7 @@ gene expression.
 The rates of fluorescent protein maturation, which was not considered in the mechanistic
 cell model, were instead all assumed to be equal to that of sfGFP. The characteristic half-time
 of this maturation process, according to
-[Balleza et al. 2018](https://www.nature.com/articles/nmeth.4509), is $13.6\ min$.
+[Balleza et al. 2018](https://www.nature.com/articles/nmeth.4509), is $13.6\ min$. The control delay of $0.01\ h$ is on the timescale of $40\ s$ assumed in [de Cesare et al. 2022](https://doi.org/10.1021/acssynbio.1c00632).
+
 
 

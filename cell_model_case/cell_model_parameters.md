@@ -22,8 +22,8 @@ demands is used for probe characterisation):
 | $\alpha_{c_2}$                            | Second reporter gene's promoter strength        | $1.25 \cdot 10^3$ | None             |
 | $\alpha_{c_3}$                            | Third reporter gene's promoter strength         | $2.50 \cdot 10^3$ | None             |
 | $\beta_{c_1} = \beta_{c_2} = \beta_{c_3}$ | mRNA degradation rates                          | $6$               | $1/h$            |
-| $k^+_{c_1} = k^+_{c_2} = k^+_{c_3}$       | mRNA-ribosome biding rates                      | $60$              | $1/(nM \cdot h)$ |
-| $k^-_{c_1} = k^-_{c_2} = k^-_{c_3}$       | mRNA-ribosome dissociation rates                | $60$              | $1/h$            |
+| $k^+\_{c_1} = k^+\_{c_2} = k^+\_{c_3}$    | mRNA-ribosome biding rates                      | $60$              | $1/(nM \cdot h)$ |
+| $k^-\_{c_1} = k^-\_{c_2} = k^-\_{c_3}$    | mRNA-ribosome dissociation rates                | $60$              | $1/h$            |
 | $n_{c_1}=n_{c_2}=n_{c_3}$                 | Reporter proteins' masses                       | $300$             | $aa$             |
 | $\mu_{c_1}=\mu_{c_2}=\mu_{c_3}$           | Fluorescent reporter proteins' maturation rates | $3.06$            | $1/h$            |
 
@@ -54,7 +54,7 @@ Module of interest (self-activating genetic switch):
 | $\beta_s = \beta_{ofp}$ | mRNA degradation rates                                                                                              | $6$               | None             |
 | $k^+_s$                 | Switch gene's mRNA-ribosome binding rate                                                                            | $0.6$             | $1/(nM \cdot h)$ |
 | $k^+_{ofp}$             | Output gene's mRNA-ribosome binding rate                                                                            | $60$              | $1/(nM \cdot h)$ |
-| $k^-_{s} = k^-_{ofp}$   | mRNA-ribosome dissociation rates                                                                                    | $6$               | $1/h$            |
+| $k^-\_{s} = k^-\_{ofp}$   | mRNA-ribosome dissociation rates                                                                                    | $6$               | $1/h$            |
 | $n_{s}=n_{ofp}$         | Protein masses                                                                                                      | $300$             | $aa$             |
 | $\mu_{ofp}$             | Output fluorescent protein's maturation rate                                                                        | $3.06$            | $1/h$            |
 | $I$                     | Share of active (i.e. bound to an inducer molecule) <br> switch proteins                                            | $0.1^*$           | None             |
@@ -62,16 +62,16 @@ Module of interest (self-activating genetic switch):
 | $\eta_{s,s}$            | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None             |
 | $F_{s,0}$               | Baseline switch and output gene expression <br> in absence of transcription activators                              | $0.05$            | None             |
 
-$^*$Everywhere except the second genetic switch in
+$^*$ Everywhere except the second genetic switch in
 _basic_model_case/basic_selfact_otherind.py_ (Fig.5d in the paper),
 for which $I=1/9$.
 
 Cybergenetic feedback controller (integral feedback implemented in the scripts 
 but currently not used):
-
-| Parameter | Description                | Value             | Units | 
-|:----------|:---------------------------|:------------------|:------| 
-| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$ | None  |
+| Parameter | Description                | Value                                                                                       | Units | 
+|:----------|:---------------------------|:--------------------------------------------------------------------------------------------|:------| 
+| $K_p$     | Proportional feedback gain | $5 \cdot 10^{-4}$                                                                           | None  |
+| $\tau$    | Control delay              | $0.01$            | $h$   |
 
 
 ### Motivation for parameter values
@@ -88,6 +88,6 @@ ribosome binding sequence (RBS) as per [Sechkar et al. 2024](https://www.nature.
 whilst for the switch gene the RBS was assumed to be
 100 times weaker - this is within the 250-fold range of RBS strengths
 suggested for this cell model in
-[Sechkar et al. 2025](https://royalsocietypublishing.org/doi/10.1098/rsif.2024.0602).
+[Sechkar et al. 2025](https://royalsocietypublishing.org/doi/10.1098/rsif.2024.0602). The control delay of $0.01\ h$ is on the timescale of $40\ s$ assumed in [de Cesare et al. 2022](https://doi.org/10.1021/acssynbio.1c00632).
 
 

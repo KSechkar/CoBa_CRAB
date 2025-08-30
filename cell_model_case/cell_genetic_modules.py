@@ -442,8 +442,8 @@ def sas_initialise():
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
     default_par['I_s'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
-    default_par['K_s,s'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_s,s'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['K_s'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_s'] = 2 # Hill coefficient of the ta protein binding to the DNA
     default_par['F_s,0'] = 0.1 # baseline expression of the burdensome gene
 
     # output fluorescent protein maturation rate
@@ -478,9 +478,9 @@ def sas_F_calc(t ,x,
                 par, name2pos):
 
     # switch protein-dependent term - the concentration of active (inducer-bound) switch proteins divided by half-saturation constant
-    p_s_term = (x[name2pos['p_s']] * par['I_s'])/par['K_s,s']
+    p_s_term = (x[name2pos['p_s']] * par['I_s'])/par['K_s']
 
-    F_s = par['F_s,0'] + (1 - par['F_s,0']) * (p_s_term**par['eta_s,s'])/(p_s_term**par['eta_s,s']+1)
+    F_s = par['F_s,0'] + (1 - par['F_s,0']) * (p_s_term**par['eta_s'])/(p_s_term**par['eta_s']+1)
     return jnp.array([
         F_s,
         F_s    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
@@ -590,8 +590,8 @@ def sas2_initialise():
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
     default_par['I_s2'] = 1  # share of switch protein bound by the corresponding inducer (0<=I_switch<=1)
-    default_par['K_s2,s2'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_s2,s2'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['K_s2'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_s2'] = 2 # Hill coefficient of the ta protein binding to the DNA
     default_par['F_s2,0'] = 0.1 # baseline expression of the burdensome gene
 
     # output fluorescent protein maturation
@@ -626,9 +626,9 @@ def sas2_F_calc(t ,x,
                 par, name2pos):
 
     # switch protein-dependent term - the concentration of active (inducer-bound) switch proteins divided by half-saturation constant
-    p_s_term = (x[name2pos['p_s2']] * par['I_s2'])/par['K_s2,s2']
+    p_s_term = (x[name2pos['p_s2']] * par['I_s2'])/par['K_s2']
 
-    F_s = par['F_s2,0'] + (1 - par['F_s2,0']) * (p_s_term**par['eta_s2,s2'])/(p_s_term**par['eta_s2,s2']+1)
+    F_s = par['F_s2,0'] + (1 - par['F_s2,0']) * (p_s_term**par['eta_s2'])/(p_s_term**par['eta_s2']+1)
     return jnp.array([
         F_s,
         F_s    # ofp co-expressed with the switch gene from the same protein; this value will have no bearing on the ODE but is repeated for illustrative purposes
@@ -736,9 +736,9 @@ def cicc_initialise():
 
     # -------- DEFAULT VALUES OF CIRCUIT-SPECIFIC PARAMETERS CAN BE SPECIFIED FROM HERE...
     # transcription regulation function
-    default_par['K_ta,i'] = 100 # dissociation constant of the ta-inducer binding
-    default_par['K_tai,b'] = 100 # dissociation constant of the ta-inducer complex from the DNA
-    default_par['eta_tai,b'] = 2 # Hill coefficient of the ta protein binding to the DNA
+    default_par['K_u'] = 100 # dissociation constant of the ta-inducer binding
+    default_par['K_b'] = 100 # dissociation constant of the ta-inducer complex from the DNA
+    default_par['eta_b'] = 2 # Hill coefficient of the ta protein binding to the DNA
     default_par['F_b,0'] = 0.1 # baseline expression of the burdensome gene
 
     # (fluorescent) mature burdensome protein parameters
@@ -774,8 +774,8 @@ def cicc_F_calc(t ,x,
     F_ta = 1 # constitutive gene
 
     # burdensome gene expression is regulated by the ta protein
-    tai_conc = x[name2pos['p_ta']] * u/(u+par['K_ta,i'])
-    F_b = par['F_b,0'] + (1 - par['F_b,0']) * (tai_conc**par['eta_tai,b'])/(tai_conc**par['eta_tai,b']+par['K_tai,b']**par['eta_tai,b'])
+    tai_conc = x[name2pos['p_ta']] * u/(u+par['K_u'])
+    F_b = par['F_b,0'] + (1 - par['F_b,0']) * (tai_conc**par['eta_b'])/(tai_conc**par['eta_b']+par['K_b']**par['eta_b'])
     return jnp.array([F_ta,
             F_b])
 

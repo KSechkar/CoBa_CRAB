@@ -40,9 +40,9 @@ Probe module:
 | $k^-_{ta} = k^-_b$       | mRNA-ribosome dissociation rates                                                                                          | $60$              | $1/h$            |
 | $n_{ta}=n_{b}$           | Protein masses                                                                                                            | $300$             | $aa$             |
 | $\mu_{b}$                | Output fluorescent protein's maturation rate                                                                              | $3.06$            | $1/h$            |
-| $K_{ta,i}$               | Half-saturation constant of the binding between <br> inducer molecules and transcription activator proteins               | $100$             | $nM$             |
-| $K_{tai,b}$              | Half-saturation constant of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA | $100$             | $nM$             |
-| $\eta_{tai,b}$           | Cooperativity of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA            | $2$               | None             |
+| $K_{u}$               | Half-saturation constant of the binding between <br> inducer molecules and transcription activator proteins               | $100$             | $nM$             |
+| $K_{b}$              | Half-saturation constant of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA | $100$             | $nM$             |
+| $\eta_{b}$           | Cooperativity of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA            | $2$               | None             |
 | $F_{b,0}$                | Baseline output gene expression <br> in absence of transcription activators                                               | $0.01$            | None             |
 
 Module of interest (self-activating genetic switch):
@@ -58,8 +58,8 @@ Module of interest (self-activating genetic switch):
 | $n_{s}=n_{ofp}$         | Protein masses                                                                                                      | $300$             | $aa$             |
 | $\mu_{ofp}$             | Output fluorescent protein's maturation rate                                                                        | $3.06$            | $1/h$            |
 | $I$                     | Share of active (i.e. bound to an inducer molecule) <br> switch proteins                                            | $0.1^*$           | None             |
-| $K_{s,s}$               | Half-saturation constant of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA | $250$             | $nM$             |
-| $\eta_{s,s}$            | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None             |
+| $K_{s}$               | Half-saturation constant of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA | $250$             | $nM$             |
+| $\eta_{s}$            | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None             |
 | $F_{s,0}$               | Baseline switch and output gene expression <br> in absence of transcription activators                              | $0.05$            | None             |
 
 $^*$ Everywhere except the second genetic switch in

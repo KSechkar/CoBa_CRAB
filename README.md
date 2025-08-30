@@ -64,6 +64,6 @@ The program files include:
 
 ## System requirements
 The code was run and ensured to be functional with Python 3.12 
-on a PCs running on Windows 11 Home 24H2. 
+on a PC running on Windows 11 Home 24H2. 
 Software requirements can be found in the file _requirements.txt_. 
 All scripts can be run on a normal PC CPU in under 5 minutes.

@@ -35,9 +35,9 @@ Probe module:
 | $q_{b}$        | Output fluorescent protein gene's resource demand                                                                         | $6.00 \cdot 10^4$ | None  |
 | $n_{ta}=n_{b}$ | Protein masses                                                                                                            | $300$             | $aa$  |
 | $\mu_{b}$      | Output fluorescent protein's maturation rate                                                                              | $3.06$            | $1/h$ |
-| $K_{ta,i}$     | Half-saturation constant of the binding between <br> inducer molecules and transcription activator proteins               | $100$             | $nM$  |
-| $K_{tai,b}$    | Half-saturation constant of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA | $100$             | $nM$  |
-| $\eta_{tai,b}$ | Cooperativity of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA            | $2$               | None  |
+| $K_{u}$     | Half-saturation constant of the binding between <br> inducer molecules and transcription activator proteins               | $100$             | $nM$  |
+| $K_{b}$    | Half-saturation constant of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA | $100$             | $nM$  |
+| $\eta_{b}$ | Cooperativity of the binding between <br> TA protein-inducer complexes and the <br> output gene's promoter DNA            | $2$               | None  |
 | $F_{b,0}$      | Baseline output gene expression <br> in absence of transcription activators                                               | $0.01$            | None  |
 
 Module of interest (self-activating genetic switch):
@@ -49,8 +49,8 @@ Module of interest (self-activating genetic switch):
 | $n_{s}=n_{ofp}$ | Protein masses                                                                                                      | $300$             | $aa$  |
 | $\mu_{ofp}$     | Output fluorescent protein's maturation rate                                                                        | $3.06$            | $1/h$ |
 | $I$             | Share of active (i.e. bound to an inducer molecule) <br> switch proteins                                            | $0.1^*$           | None  |
-| $K_{s,s}$       | Half-saturation constant of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA | $250$             | $nM$  |
-| $\eta_{s,s}$    | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None  |
+| $K_{s}$       | Half-saturation constant of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA | $250$             | $nM$  |
+| $\eta_{s}$    | Cooperativity of the binding between <br> switch-inducer complexes and the <br> regulated promoters' DNA            | $2$               | None  |
 | $F_{s,0}$       | Baseline switch and output gene expression <br> in absence of transcription activators                              | $0.05$            | None  |
 
 $^*$ Everywhere except the second genetic switch in
@@ -89,10 +89,10 @@ these values is provided in the script _common/cell_to_basic.py_.
 [Sechkar et al. 2024](https://www.nature.com/articles/s41467-024-46410-9) also provides feasible ranges for the synthetic gene parameters
 within the mechanistic cell modelling framework. The same ranges were used for our basic
 model's extents of baseline gene expression $F_{b,0}$ and $F_{s,0}$, 
-transcription factor-inducer binding half-saturation constant $K_{ta,i}$, 
-as well as the cooperativities ($\eta_{tai,b}$ and $\eta_{s,s}$) and 
+transcription factor-inducer binding half-saturation constant $K_{u}$, 
+as well as the cooperativities ($\eta_{b}$ and $\eta_{s}$) and 
 half-saturation constants of binding between transcription factors and promoter DNA
-($K_{tai,b}$ and $K_{s,s}$). Generic protein lengths $\{n_i=300\}$ were taken for
+($K_{b}$ and $K_{s}$). Generic protein lengths $\{n_i=300\}$ were taken for
 all genes for simplicity.
 
 As for synthetic gene expression parameters, there was once again no one-to-one match

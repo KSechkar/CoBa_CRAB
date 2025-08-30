@@ -17,10 +17,10 @@ import common.ode_solvers as odesols
 def F_real_calc(p_s,   # switch protein level
                 par # system parameters
                 ):
-    p_s_term = (p_s * par['I_s']) / par['K_s,s']
+    p_s_term = (p_s * par['I_s']) / par['K_s']
 
-    F_s = par['F_s,0'] + (1 - par['F_s,0']) * (p_s_term ** par['eta_s,s']) / (
-                p_s_term ** par['eta_s,s'] + 1)
+    F_s = par['F_s,0'] + (1 - par['F_s,0']) * (p_s_term ** par['eta_s']) / (
+                p_s_term ** par['eta_s'] + 1)
     return F_s
 
 
@@ -42,10 +42,10 @@ def F_req_calc(p_s, # switch protein level
 # F_SWITCH FUNCTION GRADIENTS ------------------------------------------------------------------------------------------
 # real value
 def dFreal_dps_calc(p_s, par):
-    K_div_ac_frac = par['K_s,s'] / par['I_s']
-    return par['eta_s,s'] * (1 - par['F_s,0']) * K_div_ac_frac ** par[
-        'eta_s,s'] * p_s ** (par['eta_s,s'] - 1) / \
-        (K_div_ac_frac ** par['eta_s,s'] + p_s ** par['eta_s,s']) ** 2
+    K_div_ac_frac = par['K_s'] / par['I_s']
+    return par['eta_s'] * (1 - par['F_s,0']) * K_div_ac_frac ** par[
+        'eta_s'] * p_s ** (par['eta_s'] - 1) / \
+        (K_div_ac_frac ** par['eta_s'] + p_s ** par['eta_s']) ** 2
 
 
 # required value
@@ -97,8 +97,8 @@ def gradiff_from_ps(p_s,  # value of p_s
 
 # find p_s value for a given real value of F_s
 def ps_from_F(F, par):
-    return (par['K_s,s'] / par['I_s']) * \
-        ((F - par['F_s,0']) / (1 - F)) ** (1 / par['eta_s,s'])
+    return (par['K_s'] / par['I_s']) * \
+        ((F - par['F_s,0']) / (1 - F)) ** (1 / par['eta_s'])
 
 
 # find the value of Q_osynth yielding a fixed point for given F_s and p_s values
@@ -117,8 +117,8 @@ def ps_and_Q_osynth_from_F(F, par, cellvars):
 
 # upper bound for Q_osynth to find the saddle point at the lower bifurcation (inflexion in real F_s values)
 def ps_inflexion_in_Freal(par):
-    return ((par['eta_s,s'] - 1) / (par['eta_s,s'] + 1)) ** (1 / par['eta_s,s']) * (
-                par['K_s,s'] / par['I_s'])
+    return ((par['eta_s'] - 1) / (par['eta_s'] + 1)) ** (1 / par['eta_s']) * (
+                par['K_s'] / par['I_s'])
 
 # FINDING THE STEADY STATES: AUXILIARIES FOR THE PARAMETRIC APPROACH ---------------------------------------------------
 # difference of Freal and Freq for a given p_s value
@@ -539,13 +539,13 @@ def id_cost(Q_sas_steady_states, Q_osynth_steady_states,
 
 
 def ps_from_F_id(F,
-                      K_s,switch,
+                      K_switch,
                       I_switch,
                       F_s0,
                       eta_switch
                       ):
     return jnp.where(jnp.logical_and(F>=F_s0,eta_switch>=0.0),
-                      (K_s,switch / I_switch) * ((F-F_s0) / (1 - F)) ** (1/eta_switch),
+                      (K_switch / I_switch) * ((F-F_s0) / (1 - F)) ** (1/eta_switch),
                jnp.zeros_like(F)
                )
 
@@ -555,7 +555,7 @@ def find_equilibria_for_Q_sas_range_id(Q_sas_range,  # range of burdens from oth
                                        Q_s_max,
                                        Q_ofp_max,
                                        n_switch,
-                                       K_s,switch,
+                                       K_switch,
                                        I_switch,
                                        F_s0,
                                        eta_switch
@@ -568,7 +568,7 @@ def find_equilibria_for_Q_sas_range_id(Q_sas_range,  # range of burdens from oth
 
     # get the corresponding switch protein levels
     p_s_range = ps_from_F_id(F_s_range,
-                                       K_s,switch,
+                                       K_switch,
                                        I_switch,
                                        F_s0,
                                        eta_switch
